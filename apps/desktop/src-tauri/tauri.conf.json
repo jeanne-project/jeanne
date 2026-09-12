@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "Jeanne",
+        "label": "main",
         "width": 1024,
         "height": 720,
         "resizable": true,
