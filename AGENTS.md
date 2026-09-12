@@ -42,7 +42,7 @@ Before completing any assignment, an agent must execute and pass:
 2. **Consultation de la Documentation** : Utiliser la commande CLI `ctx7` ou le skill global `find-docs` pour vérifier les APIs officielles (Tauri v2, Svelte 5, Rust 2024) en cas de doute.
 3. **Absence de Daemons MCP** : Ne créer aucun fichier de configuration MCP résident.
 
-## 5. Rôles et Personas d'Exécution (.agents/personas/)
+## 5. Rôles et Personas d'Exécution (.agent/personas/)
 
 Pour toute intervention, adopte explicitement le rôle correspondant à la tâche en cours :
 
