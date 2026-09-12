@@ -1,0 +1,29 @@
+#!/usr/bin/env sh
+set -e
+
+echo "=== [Pre-commit] Contrôles qualité & invariants Jeanne ==="
+
+# 1. Interdiction des unwrap() et expect() hors tests dans crates/core
+echo "-> Vérification des panics résiduels (unwrap/expect)..."
+FORBIDDEN=$(git grep -n -E '\.(unwrap|expect)\(' -- 'crates/core/src/*.rs' || true)
+
+if [ -n "$FORBIDDEN" ]; then
+    echo "❌ Erreur : unwrap() ou expect() détecté dans crates/core/src/ :"
+    echo "$FORBIDDEN"
+    echo "Règle SDD : utilise '?' et le typage d'erreurs avec thiserror."
+    exit 1
+fi
+
+# 2. Linter Rust strict (zéro warning toléré)
+echo "-> Exécution de Cargo Clippy..."
+cargo clippy --workspace --all-targets -- -D warnings
+
+# 3. Validation de l'ensemble des tests Cargo
+echo "-> Exécution des tests Cargo..."
+cargo test --workspace
+
+# 4. Intégrité de la compilation Frontend (Svelte 5 / TypeScript)
+echo "-> Vérification du build frontend..."
+(cd apps/desktop && npm run build)
+
+echo "✅ Tous les contrôles sont validés. Commit autorisé."
