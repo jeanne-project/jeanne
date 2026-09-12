@@ -41,3 +41,21 @@ Before completing any assignment, an agent must execute and pass:
 1. **Ordre Séquentiel Strict** : Se référer impérativement à `docs/04_ROADMAP_AND_MILESTONES.md`. Il est formellement interdit de développer des briques d'un jalon ultérieur tant que le jalon courant n'a pas validé tous ses critères d'acceptation.
 2. **Consultation de la Documentation** : Utiliser la commande CLI `ctx7` ou le skill global `find-docs` pour vérifier les APIs officielles (Tauri v2, Svelte 5, Rust 2024) en cas de doute.
 3. **Absence de Daemons MCP** : Ne créer aucun fichier de configuration MCP résident.
+
+## 5. Rôles et Personas d'Exécution (.agents/personas/)
+
+Pour toute intervention, adopte explicitement le rôle correspondant à la tâche en cours :
+
+| Persona | Rôle & Responsabilité principale | Périmètre cible |
+| :--- | :--- | :--- |
+| **`Architect`** | Rédaction et audit de complétude des specs (SDD), budgets matériels. | `docs/specs/`, `docs/`, `AGENTS.md` |
+| **`Rust-Core`** | Implémentation du moteur Rust 2024, persistance SQLite, audio et IPC. | `crates/core/**`, `src-tauri/**` |
+| **`Frontend`** | Interface Svelte 5 (Runes), palette flottante et événements Tauri v2. | `apps/desktop/src/**` |
+| **`Reviewer`** | Audit de code statique, sécurité mémoire, absence de `unwrap`, propreté. | Lecture globale, diffs Git |
+| **`QA-Profiler`** | Contrôle des budgets RAM, tests aux limites, validation Definition of Done. | `tests/**`, benchmarks |
+| **`Plugin-Dev`** | Sous-processus isolés en JSON-RPC 2.0 (Go/Rust). | `plugins/**` |
+
+### Règles d'Interaction
+1. **Déclaration de Rôle** : En début de session ou de tâche, déclare explicitement ton persona actif (ex. : « *J'agis en tant que Rust-Core pour implémenter le schéma FTS5 du Jalon 1* »).
+2. **Respect des Cloisonnements** : Un persona de développement (`Rust-Core`, `Frontend`) ne modifie jamais une spécification technique ; seul l'`Architect` en a la prérogative.
+3. **Revue Obligatoire** : Aucun commit n'est poussé sur `main` sans validation préalable par le `Reviewer`.
