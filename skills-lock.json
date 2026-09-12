@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "rust-skills": {
+      "source": "leonardomso/rust-skills",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "1223fe91b1130fb7a2276bfdf5d84d9cb71f8d404b599e7342eda1d4799c14ed"
+    },
+    "sqlite-expert": {
+      "source": "rightnow-ai/openfang",
+      "sourceType": "github",
+      "skillPath": "crates/openfang-skills/bundled/sqlite-expert/SKILL.md",
+      "computedHash": "daa1e0a26a20a3eabe3067cf4c2fb3576fa6539a4be83d72f3223e434e239509"
+    },
+    "svelte-runes": {
+      "source": "spences10/skills",
+      "sourceType": "github",
+      "skillPath": "svelte-runes/SKILL.md",
+      "computedHash": "0f5020e374818f286f17d6d0360c2262852d802b26e3912c835bb79081ca75d9"
+    },
+    "tauri": {
+      "source": "hairyf/skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri/SKILL.md",
+      "computedHash": "5d2d4e87a48d0e73b7ef0df0514b363c127af4c45373e1f3fc25f468cfbe2988"
+    },
+    "tdd": {
+      "source": "sanity-io/sanity",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/tdd/SKILL.md",
+      "computedHash": "1d0a1439aefa3ebe6a8fe83b5bb4559610d75268edd0bd4ef7d391d841742fc5"
+    }
+  }
+}

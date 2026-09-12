@@ -35,3 +35,9 @@ Before completing any assignment, an agent must execute and pass:
 1. `cargo check --workspace` -> 0 warnings, 0 errors.
 2. `cargo test --workspace` -> All tests pass.
 3. Ensure no zombie subprocesses or leaked file descriptors exist during plugin invocation.
+
+## 4. Cadre Opérationnel d'Avancement
+
+1. **Ordre Séquentiel Strict** : Se référer impérativement à `docs/04_ROADMAP_AND_MILESTONES.md`. Il est formellement interdit de développer des briques d'un jalon ultérieur tant que le jalon courant n'a pas validé tous ses critères d'acceptation.
+2. **Consultation de la Documentation** : Utiliser la commande CLI `ctx7` ou le skill global `find-docs` pour vérifier les APIs officielles (Tauri v2, Svelte 5, Rust 2024) en cas de doute.
+3. **Absence de Daemons MCP** : Ne créer aucun fichier de configuration MCP résident.

@@ -1,0 +1,29 @@
+{
+  "skills": [
+    {
+      "name": "rust-skills",
+      "source": "https://github.com/leonardomso/rust-skills",
+      "skill": "rust-skills"
+    },
+    {
+      "name": "tauri",
+      "source": "https://github.com/hairyf/skills",
+      "skill": "tauri"
+    },
+    {
+      "name": "svelte-runes",
+      "source": "spences10/skills",
+      "skill": "svelte-runes"
+    },
+    {
+      "name": "sqlite-expert",
+      "source": "https://github.com/rightnow-ai/openfang",
+      "skill": "sqlite-expert"
+    },
+    {
+      "name": "tdd",
+      "source": "sanity-io/sanity",
+      "skill": "tdd"
+    }
+  ]
+}
