@@ -387,6 +387,78 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the capture_quick_note command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-capture-quick-note",
+          "markdownDescription": "Enables the capture_quick_note command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_core_version command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-core-version",
+          "markdownDescription": "Enables the get_core_version command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_vault_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-vault-stats",
+          "markdownDescription": "Enables the get_vault_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_note_in_editor command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-note-in-editor",
+          "markdownDescription": "Enables the open_note_in_editor command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the search_notes command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-search-notes",
+          "markdownDescription": "Enables the search_notes command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_quick_access_height command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-quick-access-height",
+          "markdownDescription": "Enables the set_quick_access_height command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the capture_quick_note command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-capture-quick-note",
+          "markdownDescription": "Denies the capture_quick_note command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_core_version command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-core-version",
+          "markdownDescription": "Denies the get_core_version command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_vault_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-vault-stats",
+          "markdownDescription": "Denies the get_vault_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_note_in_editor command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-note-in-editor",
+          "markdownDescription": "Denies the open_note_in_editor command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the search_notes command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-search-notes",
+          "markdownDescription": "Denies the search_notes command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_quick_access_height command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-quick-access-height",
+          "markdownDescription": "Denies the set_quick_access_height command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",
@@ -2401,6 +2473,72 @@
           "type": "string",
           "const": "core:window:deny-unminimize",
           "markdownDescription": "Denies the unminimize command without any pre-configured scope."
+        },
+        {
+          "description": "No features are enabled by default, as we believe\nthe shortcuts can be inherently dangerous and it is\napplication specific if specific shortcuts should be\nregistered or unregistered.\n",
+          "type": "string",
+          "const": "global-shortcut:default",
+          "markdownDescription": "No features are enabled by default, as we believe\nthe shortcuts can be inherently dangerous and it is\napplication specific if specific shortcuts should be\nregistered or unregistered.\n"
+        },
+        {
+          "description": "Enables the is_registered command without any pre-configured scope.",
+          "type": "string",
+          "const": "global-shortcut:allow-is-registered",
+          "markdownDescription": "Enables the is_registered command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register command without any pre-configured scope.",
+          "type": "string",
+          "const": "global-shortcut:allow-register",
+          "markdownDescription": "Enables the register command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register_all command without any pre-configured scope.",
+          "type": "string",
+          "const": "global-shortcut:allow-register-all",
+          "markdownDescription": "Enables the register_all command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the unregister command without any pre-configured scope.",
+          "type": "string",
+          "const": "global-shortcut:allow-unregister",
+          "markdownDescription": "Enables the unregister command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the unregister_all command without any pre-configured scope.",
+          "type": "string",
+          "const": "global-shortcut:allow-unregister-all",
+          "markdownDescription": "Enables the unregister_all command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_registered command without any pre-configured scope.",
+          "type": "string",
+          "const": "global-shortcut:deny-is-registered",
+          "markdownDescription": "Denies the is_registered command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register command without any pre-configured scope.",
+          "type": "string",
+          "const": "global-shortcut:deny-register",
+          "markdownDescription": "Denies the register command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register_all command without any pre-configured scope.",
+          "type": "string",
+          "const": "global-shortcut:deny-register-all",
+          "markdownDescription": "Denies the register_all command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the unregister command without any pre-configured scope.",
+          "type": "string",
+          "const": "global-shortcut:deny-unregister",
+          "markdownDescription": "Denies the unregister command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the unregister_all command without any pre-configured scope.",
+          "type": "string",
+          "const": "global-shortcut:deny-unregister-all",
+          "markdownDescription": "Denies the unregister_all command without any pre-configured scope."
         },
         {
           "description": "This permission set configures which\nshell functionality is exposed by default.\n\n#### Granted Permissions\n\nIt allows to use the `open` functionality with a reasonable\nscope pre-configured. It will allow opening `http(s)://`,\n`tel:` and `mailto:` links.\n\n#### This default permission set includes:\n\n- `allow-open`",

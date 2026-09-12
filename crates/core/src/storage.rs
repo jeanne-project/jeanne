@@ -123,6 +123,37 @@ impl StorageManager {
         Ok(())
     }
 
+    /// Enregistre ou met à jour les métadonnées d'un fichier dans la table `files`.
+    pub fn upsert_file(
+        &self,
+        file_path: &str,
+        file_hash: &str,
+        last_modified: i64,
+        frontmatter_json: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO files (file_path, file_hash, last_modified, frontmatter_json)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(file_path) DO UPDATE SET
+                file_hash = excluded.file_hash,
+                last_modified = excluded.last_modified,
+                frontmatter_json = excluded.frontmatter_json;
+            "#,
+            rusqlite::params![file_path, file_hash, last_modified, frontmatter_json],
+        )?;
+        Ok(())
+    }
+
+    /// Supprime un fichier et propage la suppression en cascade sur ses fragments.
+    pub fn delete_file(&self, file_path: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM files WHERE file_path = ?1;",
+            rusqlite::params![file_path],
+        )?;
+        Ok(())
+    }
+
     /// Effectue une recherche plein texte BM25 sur la table virtuelle `fts_notes`.
     pub fn search_fts(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let trimmed = query.trim();
