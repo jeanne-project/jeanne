@@ -20,6 +20,10 @@ This document establishes the non-negotiable architectural invariants, memory bu
 4. **Zero-Core-Bloat**:
    - `crates/core` must never depend on UI frameworks, FFmpeg, or heavy format decoders.
    - Any document format other than plain text and Markdown must be processed exclusively via external plugins through IPC JSON-RPC 2.0.
+5. **Spec-Driven Development (SDD) Obligatoire** :
+   - Il est formellement interdit d'implémenter du code applicatif sans une spécification technique validée dans `docs/specs/<id>_SPEC_<nom>.md`.
+   - Tout développement suit obligatoirement la compétence `.agent/skills/sdd-workflow/SKILL.md` (Phase 1: Spec -> Phase 2: Rouge TDD -> Phase 3: Verte -> Phase 4: Audit de clôture).
+   - Aucun commit de code de production n'est accepté sans son jeu de tests unitaires et d'intégration validé.
 
 ## 2. Toolchain & Coding Standards
 * **Backend**: Rust **Edition 2024** (`rust-version = "1.85.0"`).
