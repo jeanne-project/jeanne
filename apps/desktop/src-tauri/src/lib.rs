@@ -264,6 +264,30 @@ fn exit_app(app: tauri::AppHandle) {
     clean_exit(&app);
 }
 
+/// Tente d'enregistrer séquentiellement une liste ordonnée de raccourcis candidats.
+/// Retourne le premier raccourci ayant réussi son enregistrement auprès du système.
+pub fn register_first_available_shortcut<F>(
+    candidates: &[&str],
+    mut register_fn: F,
+) -> Option<String>
+where
+    F: FnMut(&str) -> Result<(), String>,
+{
+    for candidate in candidates {
+        match register_fn(candidate) {
+            Ok(()) => return Some(candidate.to_string()),
+            Err(err) => {
+                tracing::warn!(
+                    "Échec d'enregistrement du raccourci global '{}' : {}",
+                    candidate,
+                    err
+                );
+            }
+        }
+    }
+    None
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt::init();
@@ -355,29 +379,21 @@ pub fn run() {
             // Enregistrement du raccourci global avec repli en cascade
             let global_shortcut = app.global_shortcut();
             let candidates = ["Alt+Space", "Alt+Shift+Space", "Ctrl+Shift+Space"];
-            let mut registered = false;
+            let registered = register_first_available_shortcut(&candidates, |candidate| {
+                global_shortcut
+                    .register(candidate)
+                    .map_err(|e| e.to_string())
+            });
 
-            for candidate in &candidates {
-                match global_shortcut.register(*candidate) {
-                    Ok(_) => {
-                        tracing::info!("Raccourci global enregistré avec succès : {}", candidate);
-                        registered = true;
-                        break;
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            "Échec d'enregistrement du raccourci global '{}' : {}",
-                            candidate,
-                            err
-                        );
-                    }
+            match registered {
+                Some(shortcut) => {
+                    tracing::info!("Raccourci global enregistré avec succès : {}", shortcut);
                 }
-            }
-
-            if !registered {
-                tracing::error!(
-                    "Impossible d'enregistrer un raccourci global valide pour l'overlay."
-                );
+                None => {
+                    tracing::error!(
+                        "Impossible d'enregistrer un raccourci global valide pour l'overlay."
+                    );
+                }
             }
 
             // Enregistrement de l'icône de zone de notification système (System Tray)
@@ -599,5 +615,55 @@ mod tests {
             results[0].title,
             format!("Journal {}", chrono::Local::now().format("%Y-%m-%d"))
         );
+    }
+
+    #[test]
+    fn test_shortcut_fallback_cascade_primary_success() {
+        let candidates = ["Alt+Space", "Alt+Shift+Space", "Ctrl+Shift+Space"];
+        let chosen = register_first_available_shortcut(&candidates, |cand| {
+            if cand == "Alt+Space" {
+                Ok(())
+            } else {
+                Err("Should not be called".into())
+            }
+        });
+        assert_eq!(chosen, Some("Alt+Space".to_string()));
+    }
+
+    #[test]
+    fn test_shortcut_fallback_cascade_secondary_success() {
+        let candidates = ["Alt+Space", "Alt+Shift+Space", "Ctrl+Shift+Space"];
+        let chosen = register_first_available_shortcut(&candidates, |cand| {
+            if cand == "Alt+Space" {
+                Err("Conflict with OS window menu".into())
+            } else if cand == "Alt+Shift+Space" {
+                Ok(())
+            } else {
+                Err("Should not be called".into())
+            }
+        });
+        assert_eq!(chosen, Some("Alt+Shift+Space".to_string()));
+    }
+
+    #[test]
+    fn test_shortcut_fallback_cascade_tertiary_success() {
+        let candidates = ["Alt+Space", "Alt+Shift+Space", "Ctrl+Shift+Space"];
+        let chosen = register_first_available_shortcut(&candidates, |cand| {
+            if cand == "Ctrl+Shift+Space" {
+                Ok(())
+            } else {
+                Err("Conflict".into())
+            }
+        });
+        assert_eq!(chosen, Some("Ctrl+Shift+Space".to_string()));
+    }
+
+    #[test]
+    fn test_shortcut_fallback_cascade_all_failed() {
+        let candidates = ["Alt+Space", "Alt+Shift+Space", "Ctrl+Shift+Space"];
+        let chosen = register_first_available_shortcut(&candidates, |_| {
+            Err("All conflicts".into())
+        });
+        assert_eq!(chosen, None);
     }
 }

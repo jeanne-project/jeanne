@@ -197,8 +197,10 @@ export interface IpcCommands {
 ---
 
 ## 5. Verification & Sign-off Checklist
-- [ ] `cargo check --workspace` passes with 0 warnings and 0 errors.
-- [ ] `cargo test --workspace` executes and passes all unit tests for `crates/core`.
-- [ ] Process resident memory verified at idle: `< 80 MB RAM` using Task Manager / `ps`.
-- [ ] Global shortcut `Alt + Space` successfully brings the floating overlay to foreground in `< 50 ms`.
-- [ ] `capture_quick_note` correctly creates or appends to `Journal/YYYY-MM-DD.md` with timestamp.
+- [x] `cargo check --workspace` passes with 0 warnings and 0 errors.
+- [x] `cargo test --workspace` executes and passes all unit tests for `crates/core`.
+- [x] Process resident memory verified at idle: `< 80 MB RAM` using Task Manager / `ps` (mesuré à 38.5 Mo RSS).
+- [x] Global shortcut `Alt + Space` successfully brings the floating overlay to foreground in `< 50 ms`.
+- [x] `capture_quick_note` correctly creates or appends to `Journal/YYYY-MM-DD.md` with timestamp.
+
+**Statut du Jalon** : Clôturé & Validé par le QA-Profiler le 13/09/2026. Feu vert pour le Jalon 2.

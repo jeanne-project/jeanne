@@ -8,16 +8,16 @@ Ce document consigne la séquence de développement obligatoire de **Jeanne**. C
 
 ## Vue d'Ensemble des Jalons
 
-| Jalon | Intitulé | Cœur fonctionnel | Budget RAM max |
-| :--- | :--- | :--- | :--- |
-| **Jalon 1** | **MVP Socle & Palette** | Watcher Markdown local + FTS5 BM25 + Overlay `Alt + Espace` | < 80 Mo |
-| **Jalon 2** | **RAG Hybride & Temps** | Vectorisation `sqlite-vec` + Formule Time-Decay + Filtre d'obsolescence | < 200 Mo |
-| **Jalon 3** | **Inférence Distante** | Client compatible OpenAI (`/v1`) en streaming SSE + Masquage PII local | < 150 Mo |
-| **Jalon 4** | **Inférence Locale** | Bindings `llama.cpp` Vulkan pour modèle GGUF 3B + Déchargement RAM | < 4,5 Go |
-| **Jalon 5** | **Pipeline Vocal** | Interaction bidirectionnelle STT (Whisper) et TTS (Piper) débrayable | Modulaire |
-| **Jalon 6** | **Capture de Réunion** | Diarisation matérielle stéréo (Micro/WASAPI) + OCR diapositives + Seeking | < 100 Mo (capture) |
-| **Jalon 7** | **Système de Plugins** | Runner IPC JSON-RPC sur stdio + Plugin parser PDF autonome (Go) | Éphémère |
-| **Jalon 8** | **Hardening & v1** | Évaluation sur Golden Dataset + Résolution de conflits + Packaging OS | < 100 Mo |
+| Jalon | Intitulé | Cœur fonctionnel | Budget RAM max | Statut |
+| :--- | :--- | :--- | :--- | :--- |
+| **Jalon 1** | **MVP Socle & Palette** | Watcher Markdown local + FTS5 BM25 + Overlay `Alt + Espace` | < 80 Mo (38.5 Mo mesuré) | ✅ Validé & Clôturé (13/09/2026) |
+| **Jalon 2** | **RAG Hybride & Temps** | Vectorisation `sqlite-vec` + Formule Time-Decay + Filtre d'obsolescence | < 200 Mo | ⏳ Prochain jalon |
+| **Jalon 3** | **Inférence Distante** | Client compatible OpenAI (`/v1`) en streaming SSE + Masquage PII local | < 150 Mo | À venir |
+| **Jalon 4** | **Inférence Locale** | Bindings `llama.cpp` Vulkan pour modèle GGUF 3B + Déchargement RAM | < 4,5 Go | À venir |
+| **Jalon 5** | **Pipeline Vocal** | Interaction bidirectionnelle STT (Whisper) et TTS (Piper) débrayable | Modulaire | À venir |
+| **Jalon 6** | **Capture de Réunion** | Diarisation matérielle stéréo (Micro/WASAPI) + OCR diapositives + Seeking | < 100 Mo (capture) | À venir |
+| **Jalon 7** | **Système de Plugins** | Runner IPC JSON-RPC sur stdio + Plugin parser PDF autonome (Go) | Éphémère | À venir |
+| **Jalon 8** | **Hardening & v1** | Évaluation sur Golden Dataset + Résolution de conflits + Packaging OS | < 100 Mo | À venir |
 
 ---
 
