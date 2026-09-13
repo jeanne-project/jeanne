@@ -1,16 +1,17 @@
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::io::AsyncWriteExt;
 
-use jeanne_core::{IndexedChunk, NoteFrontmatter, SearchResult, StorageManager, VaultStats};
+use jeanne_core::{IndexedChunk, NoteFrontmatter, SearchResult, StorageManager, VaultStats, VaultWatcher};
 
 /// État applicatif partagé contenant l'accès sécurisé au moteur SQLite et le chemin racine du coffre.
 pub struct AppState {
-    pub storage: Mutex<StorageManager>,
+    pub storage: Arc<Mutex<StorageManager>>,
     pub vault_path: PathBuf,
+    pub watcher: Mutex<Option<VaultWatcher>>,
 }
 
 #[tauri::command]
@@ -37,6 +38,14 @@ async fn capture_quick_note(
     state: tauri::State<'_, AppState>,
     content: String,
 ) -> Result<String, String> {
+    capture_quick_note_core(&state.vault_path, &state.storage, &content).await
+}
+
+async fn capture_quick_note_core(
+    vault_path: &Path,
+    storage_mutex: &Mutex<StorageManager>,
+    content: &str,
+) -> Result<String, String> {
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return Err("Le contenu de la note ne peut pas être vide".to_string());
@@ -57,7 +66,7 @@ async fn capture_quick_note(
     let time_str = now.format("%H:%M:%S").to_string();
     let now_iso = now.to_rfc3339();
 
-    let journal_dir = state.vault_path.join("Journal");
+    let journal_dir = vault_path.join("Journal");
     if !journal_dir.exists() {
         tokio::fs::create_dir_all(&journal_dir)
             .await
@@ -95,8 +104,7 @@ async fn capture_quick_note(
     file_content.hash(&mut hasher);
     let file_hash = format!("{:016x}", hasher.finish());
 
-    let storage = state
-        .storage
+    let storage = storage_mutex
         .lock()
         .map_err(|e| format!("Erreur d'accès à la base de données : {e}"))?;
 
@@ -295,9 +303,28 @@ pub fn run() {
                 ))));
             }
 
+            let storage_arc = Arc::new(Mutex::new(storage));
+
+            let mut watcher = match VaultWatcher::new(&vault_path, storage_arc.clone()) {
+                Ok(w) => w,
+                Err(err) => {
+                    tracing::error!("Impossible d'initialiser le VaultWatcher : {}", err);
+                    return Err(Box::new(std::io::Error::other(format!(
+                        "Erreur création watcher: {err}"
+                    ))));
+                }
+            };
+
+            if let Err(err) = watcher.start() {
+                tracing::warn!("Avertissement lors du démarrage du VaultWatcher : {}", err);
+            } else {
+                tracing::info!("VaultWatcher démarré avec succès sur {}", vault_path.display());
+            }
+
             app.manage(AppState {
-                storage: Mutex::new(storage),
+                storage: storage_arc,
                 vault_path,
+                watcher: Mutex::new(Some(watcher)),
             });
 
             // Enregistrement du raccourci global avec repli en cascade
@@ -363,8 +390,9 @@ mod tests {
         storage.init_schema().expect("init schema");
 
         let app_state = AppState {
-            storage: Mutex::new(storage),
+            storage: Arc::new(Mutex::new(storage)),
             vault_path: temp_dir.path().to_path_buf(),
+            watcher: Mutex::new(None),
         };
 
         // Test insertion manuelle et recherche
@@ -440,5 +468,39 @@ mod tests {
         let result = validate_and_resolve_note_path(vault_path, "nonexistent.md");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("n'existe pas"));
+    }
+
+    #[tokio::test]
+    async fn test_capture_quick_note_creates_and_indexes_journal() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let vault_path = temp_dir.path();
+        let db_path = vault_path.join(".jeanne").join("database.db");
+        let storage = StorageManager::open(&db_path).expect("open storage");
+        storage.init_schema().expect("init schema");
+        let storage_mutex = Mutex::new(storage);
+
+        let note_path_str = capture_quick_note_core(
+            vault_path,
+            &storage_mutex,
+            "/note Déploiement réussi du socle Jeanne",
+        )
+        .await
+        .expect("capture note");
+
+        let note_file = std::path::PathBuf::from(&note_path_str);
+        assert!(note_file.exists(), "Le fichier journal doit avoir été créé");
+
+        let content = std::fs::read_to_string(&note_file).expect("read journal");
+        assert!(content.contains("Déploiement réussi du socle Jeanne"));
+        assert!(content.contains("note_type: episodique"));
+
+        // Vérifier l'indexation FTS5 immédiate
+        let s = storage_mutex.lock().unwrap();
+        let results = s.search_fts("Déploiement", 5).expect("search fts");
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].title,
+            format!("Journal {}", chrono::Local::now().format("%Y-%m-%d"))
+        );
     }
 }
