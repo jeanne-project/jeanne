@@ -12,7 +12,8 @@
     "allow-open-note-in-editor",
     "allow-get-vault-stats",
     "allow-get-core-version",
-    "allow-set-quick-access-height"
+    "allow-set-quick-access-height",
+    "allow-exit-app"
   ]
 }
 

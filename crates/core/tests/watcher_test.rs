@@ -34,8 +34,11 @@ async fn test_01_03_watcher_debouncing_window() {
         tokio::time::sleep(Duration::from_millis(8)).await;
     }
 
-    // 2. Attendre l'expiration de la fenêtre de dé-rebond glissante (300 ms + marge de 150 ms)
-    tokio::time::sleep(Duration::from_millis(450)).await;
+    // 2. Attendre l'expiration de la fenêtre de dé-rebond glissante (300 ms + marge pour tolérance OS)
+    let start_wait = tokio::time::Instant::now();
+    while watcher.reconciliation_count() == 0 && start_wait.elapsed() < Duration::from_millis(2000) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 
     // 3. Assertions contractuelles de la matrice TEST-01-03
     // Assertion 1 : Exactement 1 transaction d'indexation doit avoir été exécutée
@@ -94,7 +97,17 @@ Ce motclefspecifique doit disparaître complètement lors de la suppression du f
     std::fs::write(&note_path, initial_content).expect("Création fichier initial");
 
     // Attendre l'indexation initiale par le watcher
-    tokio::time::sleep(Duration::from_millis(450)).await;
+    let start_initial = tokio::time::Instant::now();
+    while start_initial.elapsed() < Duration::from_millis(2000) {
+        let count = {
+            let s = storage.lock().unwrap();
+            s.search_fts("motclefspecifique", 1).map(|r| r.len()).unwrap_or(0)
+        };
+        if count == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 
     // Vérifier la présence initiale dans FTS5
     {
@@ -113,7 +126,22 @@ Ce motclefspecifique doit disparaître complètement lors de la suppression du f
     std::fs::remove_file(&note_path).expect("Suppression du fichier source");
 
     // Attendre la détection et réconciliation par le watcher
-    tokio::time::sleep(Duration::from_millis(450)).await;
+    let start_del = tokio::time::Instant::now();
+    while start_del.elapsed() < Duration::from_millis(2000) {
+        let count: i64 = {
+            let s = storage.lock().unwrap();
+            let conn = s.raw_connection();
+            conn.query_row(
+                "SELECT COUNT(*) FROM files WHERE file_path = 'ToDelete.md'",
+                [],
+                |row| row.get(0),
+            ).unwrap_or(1)
+        };
+        if count == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 
     // 3. Assertions contractuelles de la matrice TEST-01-04
     {

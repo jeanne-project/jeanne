@@ -14,7 +14,7 @@ tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
 jeanne-core = { path = "../../../crates/core" }
-tauri = { version = "2.0", features = ["tray-icon"] }
+tauri = { version = "2.0", features = ["tray-icon", "image-ico"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

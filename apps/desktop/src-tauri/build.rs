@@ -7,6 +7,7 @@ fn main() {
             "get_vault_stats",
             "get_core_version",
             "set_quick_access_height",
+            "exit_app",
         ]),
     ))
     .expect("failed to run tauri_build");

@@ -240,6 +240,12 @@ async fn set_quick_access_height(app: tauri::AppHandle, height: u32) -> Result<(
     Ok(())
 }
 
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    tracing::info!("Fermeture de Jeanne demandée depuis l'application.");
+    app.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt::init();
@@ -269,7 +275,8 @@ pub fn run() {
             capture_quick_note,
             open_note_in_editor,
             get_vault_stats,
-            set_quick_access_height
+            set_quick_access_height,
+            exit_app
         ])
         .setup(|app| {
             tracing::info!("Initialisation des sous-systèmes Jeanne Desktop...");
@@ -355,6 +362,68 @@ pub fn run() {
                 );
             }
 
+            // Enregistrement de l'icône de zone de notification système (System Tray)
+            let quit_i = tauri::menu::MenuItemBuilder::with_id("quit", "Quitter Jeanne").build(app)?;
+            let show_main_i = tauri::menu::MenuItemBuilder::with_id("show_main", "Ouvrir Jeanne").build(app)?;
+            let show_overlay_i = tauri::menu::MenuItemBuilder::with_id("show_overlay", "Palette d'accès rapide (Alt+Espace)").build(app)?;
+
+            let tray_menu = tauri::menu::MenuBuilder::new(app)
+                .items(&[&show_main_i, &show_overlay_i])
+                .separator()
+                .items(&[&quit_i])
+                .build()?;
+
+            let mut tray_builder = tauri::tray::TrayIconBuilder::new()
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| {
+                    match event.id().as_ref() {
+                        "quit" => {
+                            tracing::info!("Fermeture de Jeanne demandée depuis le menu de notification.");
+                            app.exit(0);
+                        }
+                        "show_main" => {
+                            if let Some(win) = app.get_webview_window("main") {
+                                let _ = win.unminimize();
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
+                        }
+                        "show_overlay" => {
+                            if let Some(win) = app.get_webview_window("quick-access") {
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.unminimize();
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                });
+
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            }
+
+            if let Err(err) = tray_builder.build(app) {
+                tracing::warn!("Impossible d'initialiser le tray icon : {}", err);
+            } else {
+                tracing::info!("System Tray initialisé avec succès.");
+            }
+
             tracing::info!("Sous-système bureau Tauri initialisé.");
             Ok(())
         })
@@ -363,6 +432,13 @@ pub fn run() {
             if let tauri::WindowEvent::Focused(false) = event {
                 if window.label() == "quick-access" {
                     let _ = window.hide();
+                }
+            }
+            // Fermeture complète et propre de l'application si la fenêtre principale est fermée
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if window.label() == "main" {
+                    tracing::info!("Fermeture de la fenêtre principale reçue, arrêt de Jeanne.");
+                    window.app_handle().exit(0);
                 }
             }
         })

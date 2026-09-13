@@ -4,17 +4,18 @@
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import type { SearchResult } from '../types/ipc';
 
+  interface Props {
+    mode?: 'overlay' | 'embedded';
+  }
+
+  let { mode = 'overlay' }: Props = $props();
+
   let query = $state('');
   let results = $state<SearchResult[]>([]);
   let selectedIndex = $state(0);
   let isLoading = $state(false);
   let statusMessage = $state<string | null>(null);
   let inputElement = $state<HTMLInputElement | null>(null);
-
-  const isNoteCommand = $derived(query.trim().startsWith('/note'));
-  const hasResults = $derived(results.length > 0);
-
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const currentWindow = getCurrentWebviewWindow();
   let isQuickAccessWindow = false;
@@ -24,8 +25,14 @@
     isQuickAccessWindow = false;
   }
 
+  const isEmbedded = $derived(mode === 'embedded' || !isQuickAccessWindow);
+  const isNoteCommand = $derived(query.trim().startsWith('/note'));
+  const hasResults = $derived(results.length > 0);
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   async function adjustWindowSize(targetHeight: number) {
-    if (!isQuickAccessWindow) return;
+    if (isEmbedded) return;
     try {
       await invoke('set_quick_access_height', { height: targetHeight });
     } catch {
@@ -38,7 +45,7 @@
   }
 
   async function hideWindow() {
-    if (!isQuickAccessWindow) return;
+    if (isEmbedded) return;
     try {
       await currentWindow.hide();
     } catch {
@@ -80,7 +87,7 @@
     }
   }
 
-  // Déclenchement de la recherche avec debouncing sans mutation synchrone de state dans l'effect
+  // Déclenchement de la recherche avec debouncing
   $effect(() => {
     const currentQ = query;
     if (debounceTimer) {
@@ -100,7 +107,14 @@
   async function handleSelectResult(item: SearchResult) {
     try {
       await invoke('open_note_in_editor', { filePath: item.file_path });
-      await hideWindow();
+      if (!isEmbedded) {
+        await hideWindow();
+      } else {
+        statusMessage = `Note ouverte dans l'éditeur système : ${item.title || item.file_path}`;
+        setTimeout(() => {
+          statusMessage = null;
+        }, 2500);
+      }
     } catch (err) {
       statusMessage = `Impossible d'ouvrir : ${err}`;
     }
@@ -121,10 +135,16 @@
       statusMessage = `Note enregistrée dans ${path}`;
       query = '';
       results = [];
-      setTimeout(async () => {
-        statusMessage = null;
-        await hideWindow();
-      }, 400);
+      if (!isEmbedded) {
+        setTimeout(async () => {
+          statusMessage = null;
+          await hideWindow();
+        }, 400);
+      } else {
+        setTimeout(() => {
+          statusMessage = null;
+        }, 3000);
+      }
     } catch (err) {
       statusMessage = `Erreur capture : ${err}`;
     } finally {
@@ -135,7 +155,13 @@
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       event.preventDefault();
-      hideWindow();
+      if (!isEmbedded) {
+        hideWindow();
+      } else {
+        query = '';
+        results = [];
+        statusMessage = null;
+      }
       return;
     }
 
@@ -165,11 +191,13 @@
     }
   }
 
-  // Gestionnaire de cycle de vie et d'écouteurs d'événements Tauri 100% Runes
+  // Écouteurs de raccourcis/focus dédiés au mode overlay
   $effect(() => {
-    inputElement?.focus();
+    if (!isEmbedded) {
+      inputElement?.focus();
+    }
 
-    if (!isQuickAccessWindow) {
+    if (isEmbedded) {
       return;
     }
 
@@ -210,8 +238,16 @@
   });
 </script>
 
-<div class="overlay-container" onkeydown={handleKeyDown} role="dialog" aria-label="Palette d'accès rapide" tabindex="-1">
-  <div class="palette-card">
+<div
+  class="search-container"
+  class:is-overlay={!isEmbedded}
+  class:is-embedded={isEmbedded}
+  onkeydown={handleKeyDown}
+  role="dialog"
+  aria-label="Recherche et accès rapide"
+  tabindex="-1"
+>
+  <div class="palette-card" class:card-embedded={isEmbedded}>
     <div class="search-bar">
       <div class="search-icon" aria-hidden="true">
         {#if isLoading}
@@ -234,7 +270,7 @@
         placeholder="Rechercher une note ou taper '/note [texte]' pour consigner..."
         autocomplete="off"
         spellcheck="false"
-        autofocus
+        autofocus={!isEmbedded}
       />
 
       {#if query}
@@ -287,7 +323,7 @@
       <div class="shortcut-hints">
         <span><kbd>↑</kbd><kbd>↓</kbd> Naviguer</span>
         <span><kbd>↵</kbd> {isNoteCommand ? 'Enregistrer' : 'Ouvrir'}</span>
-        <span><kbd>Échap</kbd> Fermer</span>
+        <span><kbd>Échap</kbd> {isEmbedded ? 'Effacer' : 'Fermer'}</span>
       </div>
       <div class="brand">Jeanne Core v1</div>
     </div>
@@ -295,30 +331,31 @@
 </div>
 
 <style>
-  :global(body, html) {
-    margin: 0;
-    padding: 0;
-    background: transparent !important;
-    overflow: hidden;
-    user-select: none;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  }
-
-  .overlay-container {
-    width: 100vw;
-    height: 100vh;
+  .search-container {
     box-sizing: border-box;
     display: flex;
     justify-content: center;
     align-items: flex-start;
+  }
+
+  .search-container.is-overlay {
+    width: 100vw;
+    height: 100vh;
     padding: 0;
     background: transparent;
+  }
+
+  .search-container.is-embedded {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0;
   }
 
   .palette-card {
     width: 100%;
     max-width: 720px;
-    background: rgba(18, 22, 31, 0.88);
+    background: rgba(18, 22, 31, 0.94);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -330,13 +367,25 @@
     color: #e2e8f0;
   }
 
+  .palette-card.card-embedded {
+    background: #161b22;
+    border: 1px solid #30363d;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .palette-card.card-embedded:focus-within {
+    border-color: rgba(99, 102, 241, 0.6);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99, 102, 241, 0.4);
+  }
+
   .search-bar {
     display: flex;
     align-items: center;
-    padding: 0.65rem 1rem;
+    padding: 0.75rem 1.1rem;
     gap: 0.75rem;
     box-sizing: border-box;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.02);
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
 
@@ -375,14 +424,14 @@
     background: transparent;
     border: none;
     outline: none;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     color: #f8fafc;
     font-weight: 400;
   }
 
   input::placeholder {
     color: #64748b;
-    font-size: 1rem;
+    font-size: 0.95rem;
   }
 
   .clear-button {
@@ -421,7 +470,7 @@
   }
 
   .results-list {
-    max-height: 270px;
+    max-height: 280px;
     overflow-y: auto;
     padding: 0.4rem;
     display: flex;
@@ -449,7 +498,7 @@
     display: block;
     box-sizing: border-box;
     background: transparent;
-    transition: background 0.12s ease, transform 0.08s ease;
+    transition: background 0.12s ease;
   }
 
   .result-item:hover,
@@ -498,7 +547,7 @@
   }
 
   .status-banner {
-    padding: 0.4rem 1rem;
+    padding: 0.5rem 1rem;
     font-size: 0.8rem;
     background: rgba(34, 197, 94, 0.15);
     color: #86efac;
@@ -509,7 +558,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.35rem 1rem;
+    padding: 0.4rem 1rem;
     box-sizing: border-box;
     background: rgba(0, 0, 0, 0.25);
     border-top: 1px solid rgba(255, 255, 255, 0.05);

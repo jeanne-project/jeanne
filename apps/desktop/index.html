@@ -8,11 +8,21 @@
       html, body {
         margin: 0;
         padding: 0;
-        background: transparent;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+      body.main-window {
+        background-color: #0d1117;
+        color: #e6edf3;
+        min-height: 100vh;
+        overflow-y: auto;
+      }
+      body.quick-access-window {
+        background: transparent !important;
+        overflow: hidden;
       }
     </style>
   </head>
-  <body>
+  <body class="main-window">
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

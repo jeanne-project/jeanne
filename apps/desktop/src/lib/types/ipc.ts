@@ -19,4 +19,5 @@ export interface IpcCommands {
   capture_quick_note(content: string): Promise<string>;
   open_note_in_editor(file_path: string): Promise<void>;
   get_vault_stats(): Promise<VaultStats>;
+  exit_app(): Promise<void>;
 }

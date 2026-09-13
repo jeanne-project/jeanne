@@ -183,6 +183,12 @@
           "markdownDescription": "Enables the capture_quick_note command without any pre-configured scope."
         },
         {
+          "description": "Enables the exit_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-exit-app",
+          "markdownDescription": "Enables the exit_app command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_core_version command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-core-version",
@@ -217,6 +223,12 @@
           "type": "string",
           "const": "deny-capture-quick-note",
           "markdownDescription": "Denies the capture_quick_note command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the exit_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-exit-app",
+          "markdownDescription": "Denies the exit_app command without any pre-configured scope."
         },
         {
           "description": "Denies the get_core_version command without any pre-configured scope.",
