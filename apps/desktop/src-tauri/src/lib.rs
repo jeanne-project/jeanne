@@ -240,10 +240,28 @@ async fn set_quick_access_height(app: tauri::AppHandle, height: u32) -> Result<(
     Ok(())
 }
 
+fn clean_exit(app: &tauri::AppHandle) {
+    tracing::info!("Arrêt ordonné de Jeanne et libération des ressources...");
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut watcher_guard) = state.watcher.lock() {
+            if let Some(mut watcher) = watcher_guard.take() {
+                watcher.stop();
+            }
+        }
+    }
+    if let Some(quick_window) = app.get_webview_window("quick-access") {
+        let _ = quick_window.destroy();
+    }
+    if let Some(main_window) = app.get_webview_window("main") {
+        let _ = main_window.destroy();
+    }
+    app.exit(0);
+}
+
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
     tracing::info!("Fermeture de Jeanne demandée depuis l'application.");
-    app.exit(0);
+    clean_exit(&app);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -380,7 +398,7 @@ pub fn run() {
                     match event.id().as_ref() {
                         "quit" => {
                             tracing::info!("Fermeture de Jeanne demandée depuis le menu de notification.");
-                            app.exit(0);
+                            clean_exit(app);
                         }
                         "show_main" => {
                             if let Some(win) = app.get_webview_window("main") {
@@ -435,10 +453,13 @@ pub fn run() {
                 }
             }
             // Fermeture complète et propre de l'application si la fenêtre principale est fermée
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
-                    tracing::info!("Fermeture de la fenêtre principale reçue, arrêt de Jeanne.");
-                    window.app_handle().exit(0);
+                    tracing::info!("Fermeture de la fenêtre principale reçue, arrêt ordonné de Jeanne.");
+                    clean_exit(window.app_handle());
+                } else if window.label() == "quick-access" {
+                    api.prevent_close();
+                    let _ = window.hide();
                 }
             }
         })
