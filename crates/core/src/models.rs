@@ -21,7 +21,7 @@ pub struct NoteFrontmatter {
     #[serde(alias = "type", default = "default_note_type")]
     pub note_type: String, // "semantique" | "episodique" | "procedural"
     #[serde(default = "default_statut")]
-    pub statut: String,    // "actif" | "obsolete" | "archive"
+    pub statut: String, // "actif" | "obsolete" | "archive"
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]

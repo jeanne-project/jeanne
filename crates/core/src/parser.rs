@@ -1,6 +1,6 @@
-use gray_matter::{engine::YAML, Matter};
 use crate::error::{JeanneError, Result};
 use crate::models::NoteFrontmatter;
+use gray_matter::{Matter, engine::YAML};
 
 /// Parse le contenu brut d'une note Markdown et sépare le frontmatter YAML du corps Markdown.
 pub fn parse_markdown(content: &str) -> Result<(NoteFrontmatter, String)> {

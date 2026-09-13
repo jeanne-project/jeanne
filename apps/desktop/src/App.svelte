@@ -1,7 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-  import { onMount } from 'svelte';
   import QuickAccess from './lib/components/QuickAccess.svelte';
   import type { VaultStats } from './lib/types/ipc';
 
@@ -11,26 +10,32 @@
 
   const isQuickAccess = $derived(windowLabel === 'quick-access');
 
-  onMount(async () => {
+  $effect(() => {
+    let label = 'main';
     try {
       const win = getCurrentWebviewWindow();
-      windowLabel = win.label;
+      label = win.label;
     } catch {
-      windowLabel = 'main';
+      label = 'main';
     }
+    windowLabel = label;
 
-    if (!isQuickAccess) {
-      try {
-        coreVersion = await invoke<string>('get_core_version');
-      } catch {
-        coreVersion = 'Erreur connexion core';
-      }
+    if (label !== 'quick-access') {
+      invoke<string>('get_core_version')
+        .then((ver) => {
+          coreVersion = ver;
+        })
+        .catch(() => {
+          coreVersion = 'Erreur connexion core';
+        });
 
-      try {
-        vaultStats = await invoke<VaultStats>('get_vault_stats');
-      } catch {
-        vaultStats = null;
-      }
+      invoke<VaultStats>('get_vault_stats')
+        .then((stats) => {
+          vaultStats = stats;
+        })
+        .catch(() => {
+          vaultStats = null;
+        });
     }
   });
 </script>
@@ -111,6 +116,7 @@
     letter-spacing: -0.02em;
     margin: 0;
     background: linear-gradient(135deg, #a5b4fc, #6366f1);
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }

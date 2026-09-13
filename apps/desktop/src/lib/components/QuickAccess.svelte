@@ -2,7 +2,6 @@
   import { invoke } from '@tauri-apps/api/core';
   import { LogicalSize } from '@tauri-apps/api/dpi';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-  import { onMount, onDestroy } from 'svelte';
   import type { SearchResult } from '../types/ipc';
 
   let query = $state('');
@@ -15,13 +14,18 @@
   const isNoteCommand = $derived(query.trim().startsWith('/note'));
   const hasResults = $derived(results.length > 0);
 
-  let unlistenBlur: (() => void) | null = null;
-  let unlistenFocus: (() => void) | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const currentWindow = getCurrentWebviewWindow();
+  let isQuickAccessWindow = false;
+  try {
+    isQuickAccessWindow = currentWindow.label === 'quick-access';
+  } catch {
+    isQuickAccessWindow = false;
+  }
 
   async function adjustWindowSize(targetHeight: number) {
+    if (!isQuickAccessWindow) return;
     try {
       await invoke('set_quick_access_height', { height: targetHeight });
     } catch {
@@ -34,6 +38,7 @@
   }
 
   async function hideWindow() {
+    if (!isQuickAccessWindow) return;
     try {
       await currentWindow.hide();
     } catch {
@@ -43,10 +48,17 @@
 
   async function executeSearch(searchQuery: string) {
     const trimmed = searchQuery.trim();
-    if (!trimmed || trimmed.startsWith('/note')) {
+    if (!trimmed) {
       results = [];
       selectedIndex = 0;
       await adjustWindowSize(84);
+      return;
+    }
+
+    if (trimmed.startsWith('/note')) {
+      results = [];
+      selectedIndex = 0;
+      await adjustWindowSize(115);
       return;
     }
 
@@ -68,21 +80,17 @@
     }
   }
 
+  // Déclenchement de la recherche avec debouncing sans mutation synchrone de state dans l'effect
   $effect(() => {
     const currentQ = query;
     if (debounceTimer) {
       clearTimeout(debounceTimer);
     }
 
-    if (currentQ.trim().startsWith('/note')) {
-      results = [];
-      adjustWindowSize(115);
-      return;
-    }
-
+    const delay = currentQ.trim().startsWith('/note') ? 0 : 120;
     debounceTimer = setTimeout(() => {
       executeSearch(currentQ);
-    }, 120);
+    }, delay);
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -100,7 +108,11 @@
 
   async function handleCaptureNote() {
     const trimmed = query.trim();
-    if (!trimmed) return;
+    const noteBody = trimmed.startsWith('/note') ? trimmed.slice(5).trim() : trimmed;
+    if (!noteBody) {
+      statusMessage = 'Le contenu de la note ne peut pas être vide';
+      return;
+    }
 
     try {
       isLoading = true;
@@ -153,26 +165,48 @@
     }
   }
 
-  onMount(async () => {
+  // Gestionnaire de cycle de vie et d'écouteurs d'événements Tauri 100% Runes
+  $effect(() => {
     inputElement?.focus();
 
-    try {
-      unlistenBlur = await currentWindow.listen('tauri://blur', () => {
-        hideWindow();
-      });
-
-      unlistenFocus = await currentWindow.listen('tauri://focus', () => {
-        inputElement?.focus();
-        inputElement?.select();
-      });
-    } catch {
-      // Ignorer dans les environnements non-Tauri
+    if (!isQuickAccessWindow) {
+      return;
     }
-  });
 
-  onDestroy(() => {
-    if (unlistenBlur) unlistenBlur();
-    if (unlistenFocus) unlistenFocus();
+    let isMounted = true;
+    let unlistenBlur: (() => void) | undefined;
+    let unlistenFocus: (() => void) | undefined;
+
+    (async () => {
+      try {
+        const uBlur = await currentWindow.listen('tauri://blur', () => {
+          hideWindow();
+        });
+        if (!isMounted) {
+          uBlur();
+        } else {
+          unlistenBlur = uBlur;
+        }
+
+        const uFocus = await currentWindow.listen('tauri://focus', () => {
+          inputElement?.focus();
+          inputElement?.select();
+        });
+        if (!isMounted) {
+          uFocus();
+        } else {
+          unlistenFocus = uFocus;
+        }
+      } catch {
+        // Mode hors Tauri (tests/navigateur)
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+      if (unlistenBlur) unlistenBlur();
+      if (unlistenFocus) unlistenFocus();
+    };
   });
 </script>
 
@@ -450,6 +484,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     display: -webkit-box;
+    line-clamp: 2;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
   }

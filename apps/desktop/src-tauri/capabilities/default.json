@@ -7,8 +7,6 @@
     "core:default",
     "core:window:allow-set-size",
     "core:window:allow-hide",
-    "shell:default",
-    "global-shortcut:default",
     "allow-search-notes",
     "allow-capture-quick-note",
     "allow-open-note-in-editor",
@@ -17,3 +15,4 @@
     "allow-set-quick-access-height"
   ]
 }
+

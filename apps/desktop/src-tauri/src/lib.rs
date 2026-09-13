@@ -1,9 +1,9 @@
 use std::hash::{Hash, Hasher};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
+use tokio::io::AsyncWriteExt;
 
 use jeanne_core::{IndexedChunk, NoteFrontmatter, SearchResult, StorageManager, VaultStats};
 
@@ -42,11 +42,15 @@ async fn capture_quick_note(
         return Err("Le contenu de la note ne peut pas être vide".to_string());
     }
 
-    let body_text = if let Some(stripped) = trimmed.strip_prefix("/note ") {
+    let body_text = if let Some(stripped) = trimmed.strip_prefix("/note") {
         stripped.trim()
     } else {
         trimmed
     };
+
+    if body_text.is_empty() {
+        return Err("Le contenu de la note ne peut pas être vide".to_string());
+    }
 
     let now = chrono::Local::now();
     let date_str = now.format("%Y-%m-%d").to_string();
@@ -55,7 +59,8 @@ async fn capture_quick_note(
 
     let journal_dir = state.vault_path.join("Journal");
     if !journal_dir.exists() {
-        std::fs::create_dir_all(&journal_dir)
+        tokio::fs::create_dir_all(&journal_dir)
+            .await
             .map_err(|e| format!("Impossible de créer le dossier Journal : {e}"))?;
     }
 
@@ -66,19 +71,23 @@ async fn capture_quick_note(
         let initial_content = format!(
             "---\nid: journal-{date_str}\ntitle: Journal {date_str}\ndate_creation: \"{now_iso}\"\ndate_modification: \"{now_iso}\"\nnote_type: episodique\nstatut: actif\ntags:\n  - journal\n---\n\n# Journal - {date_str}\n\n## {time_str}\n{body_text}\n"
         );
-        std::fs::write(&note_file, initial_content)
+        tokio::fs::write(&note_file, initial_content)
+            .await
             .map_err(|e| format!("Impossible d'écrire la note : {e}"))?;
     } else {
-        let mut file = std::fs::OpenOptions::new()
+        let mut file = tokio::fs::OpenOptions::new()
             .append(true)
             .open(&note_file)
+            .await
             .map_err(|e| format!("Impossible d'ouvrir le fichier journal : {e}"))?;
-        writeln!(file, "\n## {time_str}\n{body_text}")
+        file.write_all(format!("\n## {time_str}\n{body_text}\n").as_bytes())
+            .await
             .map_err(|e| format!("Impossible d'ajouter le contenu à la note : {e}"))?;
     }
 
     // Indexation FTS5 en temps réel
-    let file_content = std::fs::read_to_string(&note_file)
+    let file_content = tokio::fs::read_to_string(&note_file)
+        .await
         .map_err(|e| format!("Impossible de lire la note pour indexation : {e}"))?;
     let rel_path = format!("Journal/{date_str}.md");
 
@@ -96,7 +105,12 @@ async fn capture_quick_note(
 
     let frontmatter_json = serde_json::to_string(&frontmatter).ok();
     storage
-        .upsert_file(&rel_path, &file_hash, now.timestamp(), frontmatter_json.as_deref())
+        .upsert_file(
+            &rel_path,
+            &file_hash,
+            now.timestamp(),
+            frontmatter_json.as_deref(),
+        )
         .map_err(|e| e.to_string())?;
 
     let chunk = IndexedChunk {
@@ -114,30 +128,66 @@ async fn capture_quick_note(
     Ok(note_file.to_string_lossy().to_string())
 }
 
+/// Valide le confinement strict et l'extension autorisée pour l'ouverture d'une note.
+fn validate_and_resolve_note_path(vault_path: &Path, file_path: &str) -> Result<PathBuf, String> {
+    let path = Path::new(file_path);
+    let target_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        vault_path.join(path)
+    };
+
+    if !target_path.exists() {
+        return Err(format!(
+            "Le fichier n'existe pas : {}",
+            target_path.display()
+        ));
+    }
+
+    // 1. Protection stricte contre le Path Traversal via canonicalisation
+    let canonical_target = target_path
+        .canonicalize()
+        .map_err(|e| format!("Chemin cible invalide : {e}"))?;
+    let canonical_vault = vault_path
+        .canonicalize()
+        .map_err(|e| format!("Chemin du coffre invalide : {e}"))?;
+
+    if !canonical_target.starts_with(&canonical_vault) {
+        return Err("Accès refusé : le fichier doit résider à l'intérieur du coffre".to_string());
+    }
+
+    // 2. Restriction stricte aux extensions Markdown
+    let extension = canonical_target
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if extension != "md" && extension != "markdown" {
+        return Err(
+            "Format non autorisé : seules les notes Markdown peuvent être ouvertes".to_string(),
+        );
+    }
+
+    Ok(canonical_target)
+}
+
 #[tauri::command]
 async fn open_note_in_editor(
     state: tauri::State<'_, AppState>,
     file_path: String,
 ) -> Result<(), String> {
-    let path = Path::new(&file_path);
-    let target_path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        state.vault_path.join(path)
-    };
-
-    if !target_path.exists() {
-        return Err(format!("Le fichier n'existe pas : {}", target_path.display()));
-    }
-
-    let path_str = target_path.to_string_lossy().to_string();
+    let canonical_target = validate_and_resolve_note_path(&state.vault_path, &file_path)?;
+    let path_str = canonical_target.to_string_lossy().to_string();
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &path_str])
+        // Utilisation directe de rundll32 avec ShellExecuteEx via FileProtocolHandler
+        // sans passer par cmd.exe pour éliminer tout risque d'injection de commande shell
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", &path_str])
             .spawn()
-            .map_err(|e| format!("Impossible d'ouvrir le fichier avec l'application système : {e}"))?;
+            .map_err(|e| {
+                format!("Impossible d'ouvrir le fichier avec l'application système : {e}")
+            })?;
     }
 
     #[cfg(target_os = "macos")]
@@ -145,7 +195,9 @@ async fn open_note_in_editor(
         std::process::Command::new("open")
             .arg(&path_str)
             .spawn()
-            .map_err(|e| format!("Impossible d'ouvrir le fichier avec l'application système : {e}"))?;
+            .map_err(|e| {
+                format!("Impossible d'ouvrir le fichier avec l'application système : {e}")
+            })?;
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -153,16 +205,16 @@ async fn open_note_in_editor(
         std::process::Command::new("xdg-open")
             .arg(&path_str)
             .spawn()
-            .map_err(|e| format!("Impossible d'ouvrir le fichier avec l'application système : {e}"))?;
+            .map_err(|e| {
+                format!("Impossible d'ouvrir le fichier avec l'application système : {e}")
+            })?;
     }
 
     Ok(())
 }
 
 #[tauri::command]
-async fn get_vault_stats(
-    state: tauri::State<'_, AppState>,
-) -> Result<VaultStats, String> {
+async fn get_vault_stats(state: tauri::State<'_, AppState>) -> Result<VaultStats, String> {
     let storage = state
         .storage
         .lock()
@@ -171,10 +223,7 @@ async fn get_vault_stats(
 }
 
 #[tauri::command]
-async fn set_quick_access_height(
-    app: tauri::AppHandle,
-    height: u32,
-) -> Result<(), String> {
+async fn set_quick_access_height(app: tauri::AppHandle, height: u32) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("quick-access") {
         window
             .set_size(tauri::LogicalSize::new(720.0, height as f64))
@@ -188,8 +237,7 @@ pub fn run() {
     tracing_subscriber::fmt::init();
     tracing::info!("Démarrage du client Jeanne Desktop...");
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
+    if let Err(err) = tauri::Builder::default()
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -292,7 +340,9 @@ pub fn run() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("Erreur lors de l'exécution de Jeanne Desktop");
+    {
+        tracing::error!("Erreur critique lors de l'exécution de Jeanne Desktop : {err}");
+    }
 }
 
 #[cfg(test)]
@@ -343,5 +393,52 @@ mod tests {
         let stats = s.get_stats().expect("stats");
         assert_eq!(stats.total_files, 1);
         assert_eq!(stats.total_chunks, 1);
+    }
+
+    #[test]
+    fn test_validate_and_resolve_note_path_valid() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let vault_path = temp_dir.path();
+        let note_path = vault_path.join("test.md");
+        std::fs::write(&note_path, "# Test").expect("write test file");
+
+        let resolved = validate_and_resolve_note_path(vault_path, "test.md");
+        assert!(resolved.is_ok());
+        assert_eq!(resolved.unwrap(), note_path.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn test_validate_and_resolve_note_path_outside_vault() {
+        let vault_dir = tempfile::tempdir().expect("vault dir");
+        let outside_dir = tempfile::tempdir().expect("outside dir");
+        let outside_file = outside_dir.path().join("evil.md");
+        std::fs::write(&outside_file, "# Evil").expect("write file");
+
+        let result =
+            validate_and_resolve_note_path(vault_dir.path(), outside_file.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Accès refusé"));
+    }
+
+    #[test]
+    fn test_validate_and_resolve_note_path_forbidden_extension() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let vault_path = temp_dir.path();
+        let exe_file = vault_path.join("script.bat");
+        std::fs::write(&exe_file, "echo hello").expect("write file");
+
+        let result = validate_and_resolve_note_path(vault_path, "script.bat");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Format non autorisé"));
+    }
+
+    #[test]
+    fn test_validate_and_resolve_note_path_nonexistent() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let vault_path = temp_dir.path();
+
+        let result = validate_and_resolve_note_path(vault_path, "nonexistent.md");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("n'existe pas"));
     }
 }

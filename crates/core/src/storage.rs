@@ -1,7 +1,7 @@
-use std::path::Path;
-use rusqlite::Connection;
 use crate::error::Result;
 use crate::models::{IndexedChunk, SearchResult, VaultStats};
+use rusqlite::Connection;
+use std::path::Path;
 
 /// Gestionnaire de persistance locale SQLite et index FTS5.
 pub struct StorageManager {
@@ -162,13 +162,20 @@ impl StorageManager {
         }
 
         let limit_i64 = i64::try_from(limit).unwrap_or(50);
+        let query_str = sanitize_fts5_query(trimmed);
+        if query_str.is_empty() {
+            return Ok(Vec::new());
+        }
 
-        let mut stmt = self.conn.prepare(
+        let hl_start = "\u{E000}";
+        let hl_end = "\u{E001}";
+
+        let sql = format!(
             r#"
             SELECT
                 f.chunk_id,
                 c.file_path,
-                snippet(fts_notes, 1, '<mark>', '</mark>', '...', 32) AS snippet,
+                snippet(fts_notes, 1, '{hl_start}', '{hl_end}', '...', 32) AS snippet,
                 -bm25(fts_notes) AS score,
                 c.statut,
                 c.date_creation,
@@ -179,47 +186,76 @@ impl StorageManager {
             WHERE fts_notes MATCH ?1
             ORDER BY score DESC
             LIMIT ?2
-            "#,
-        )?;
+            "#
+        );
 
-        let rows = stmt.query_map(rusqlite::params![trimmed, limit_i64], |row| {
-            let chunk_id: String = row.get(0)?;
-            let file_path: String = row.get(1)?;
-            let snippet: String = row.get(2)?;
-            let score: f64 = row.get(3)?;
-            let statut: String = row.get(4)?;
-            let date_creation_num: i64 = row.get(5)?;
-            let frontmatter_json: Option<String> = row.get(6)?;
+        let mut stmt = self.conn.prepare(&sql)?;
 
-            let title = frontmatter_json
-                .as_deref()
-                .and_then(|json_str| serde_json::from_str::<serde_json::Value>(json_str).ok())
-                .and_then(|v| v.get("title").and_then(|t| t.as_str()).map(ToString::to_string))
-                .unwrap_or_else(|| {
-                    Path::new(&file_path)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(&file_path)
-                        .to_string()
-                });
+        let mut execute_search = |q: &str| -> rusqlite::Result<Vec<SearchResult>> {
+            let rows = stmt.query_map(rusqlite::params![q, limit_i64], |row| {
+                let chunk_id: String = row.get(0)?;
+                let file_path: String = row.get(1)?;
+                let raw_snippet: String = row.get(2)?;
+                let score: f64 = row.get(3)?;
+                let statut: String = row.get(4)?;
+                let date_creation_num: i64 = row.get(5)?;
+                let frontmatter_json: Option<String> = row.get(6)?;
 
-            Ok(SearchResult {
-                chunk_id,
-                file_path,
-                title,
-                snippet,
-                score,
-                statut,
-                date_creation: date_creation_num.to_string(),
-            })
-        })?;
+                // Échappement HTML strict contre les attaques XSS
+                let snippet = html_escape(&raw_snippet)
+                    .replace(hl_start, "<mark>")
+                    .replace(hl_end, "</mark>");
 
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row?);
+                let title = frontmatter_json
+                    .as_deref()
+                    .and_then(|json_str| serde_json::from_str::<serde_json::Value>(json_str).ok())
+                    .and_then(|v| {
+                        v.get("title")
+                            .and_then(|t| t.as_str())
+                            .map(ToString::to_string)
+                    })
+                    .unwrap_or_else(|| {
+                        Path::new(&file_path)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(&file_path)
+                            .to_string()
+                    });
+
+                Ok(SearchResult {
+                    chunk_id,
+                    file_path,
+                    title,
+                    snippet,
+                    score,
+                    statut,
+                    date_creation: date_creation_num.to_string(),
+                })
+            })?;
+
+            let mut results = Vec::new();
+            for row in rows {
+                results.push(row?);
+            }
+            Ok(results)
+        };
+
+        match execute_search(&query_str) {
+            Ok(results) => Ok(results),
+            Err(_) => {
+                // Repli sécurisé en cas d'erreur de syntaxe FTS5 (ex. guillemets ou opérateurs)
+                let fallback = query_str
+                    .split_whitespace()
+                    .map(|w| format!("\"{}\"*", w.replace('"', "")))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if let Ok(results) = execute_search(&fallback) {
+                    Ok(results)
+                } else {
+                    Ok(Vec::new())
+                }
+            }
         }
-
-        Ok(results)
     }
 
     /// Calcule les statistiques d'indexation du coffre.
@@ -227,9 +263,9 @@ impl StorageManager {
         let total_files: usize = self
             .conn
             .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))?;
-        let total_chunks: usize = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))?;
+        let total_chunks: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))?;
         let last_scan_timestamp: i64 = self.conn.query_row(
             "SELECT COALESCE(MAX(last_modified), 0) FROM files",
             [],
@@ -247,4 +283,29 @@ impl StorageManager {
     pub fn raw_connection(&self) -> &Connection {
         &self.conn
     }
+}
+
+fn sanitize_fts5_query(query: &str) -> String {
+    let trimmed = query.trim();
+    let quote_count = trimmed.chars().filter(|c| *c == '"').count();
+    if quote_count % 2 != 0 {
+        trimmed.replace('"', "")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn html_escape(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    for c in input.chars() {
+        match c {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '"' => output.push_str("&quot;"),
+            '\'' => output.push_str("&#39;"),
+            _ => output.push(c),
+        }
+    }
+    output
 }
