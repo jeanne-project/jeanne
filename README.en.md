@@ -1,5 +1,9 @@
 # Jeanne (Monorepo)
 
+<p align="center">
+  <img src="docs/assets/branding/jeanne_symbol.png" width="128" alt="Jeanne Logo" />
+</p>
+
 <!-- README-I18N:START -->
 
 [Français](./README.md) | **English**
