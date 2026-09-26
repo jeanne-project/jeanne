@@ -34,7 +34,7 @@ Ces workflows sont exécutés sur l'infrastructure GitHub Actions via `.github/w
 * **Déclencheurs** : `push` sur `main`, `pull_request`, et exécution planifiée hebdomadaire (lundi à 03:00 UTC).
 * **Rôle** : Sécurisation de la chaîne d'approvisionnement logicielle et intégrité légale.
 * **Jobs** :
-  1. `gitleaks` : Scan complet de l'historique Git (`gitleaks/gitleaks-action`) pour interdire la persistance d'identifiants, tokens ou clés privées.
+  1. `gitleaks` : Scan complet de l'historique Git via le binaire officiel autonome open-source `gitleaks` (évitant les restrictions de licence commerciale de l'Action v2 en contexte organisation GitHub).
   2. `cargo-audit` : Détection des vulnérabilités connues dans l'arbre des dépendances Rust via la base Advisory de RustSec.
   3. `cargo-deny` : Contrôle de la conformité des licences (autorisant strictement MIT, Apache-2.0, BSD-3-Clause, ISC, Unicode, CC0) et détection des doublons de crates non autorisés (`deny.toml`).
 
@@ -52,6 +52,7 @@ Ces workflows sont exécutés sur l'infrastructure GitHub Actions via `.github/w
   - **Linux** : Paquet Debian (`.deb`) et paquet portable universel (`.AppImage`).
   - **macOS** : Image disque universelle (`.dmg`).
 * **Publication** : Création d'une release GitHub au statut *brouillon* (*draft release*), téléversement des binaires signés et génération des sommes de contrôle cryptographiques `SHA256SUMS`.
+* **Signature de Code (Feuille de route Jalon 8)** : L'injection des certificats d'autorité (Apple Developer ID avec notarisation `altool`/`notarytool`, Windows Authenticode) et de la clé privée de mise à jour Tauri (`TAURI_SIGNING_PRIVATE_KEY`) est planifiée pour le Jalon 8 avant publication grand public.
 
 ---
 
