@@ -27,11 +27,15 @@ fn benchmark_bm25_search_latency() {
         ).expect("Insertion fichier");
 
         let content = if i % 5 == 0 {
-            format!("Architecture distribuée et gestion souveraine des données locales pour Jeanne document {i}.")
+            format!(
+                "Architecture distribuée et gestion souveraine des données locales pour Jeanne document {i}."
+            )
         } else if i % 3 == 0 {
             format!("Indexation lexicale FTS5 et synchronisation continue du coffre markdown {i}.")
         } else {
-            format!("Contenu générique de réunion et journalisation périodique fragment numéro {i}.")
+            format!(
+                "Contenu générique de réunion et journalisation périodique fragment numéro {i}."
+            )
         };
 
         let chunk = IndexedChunk {
@@ -48,7 +52,13 @@ fn benchmark_bm25_search_latency() {
     }
 
     // 2. Exécution de 100 requêtes de recherche représentatives et mesure de la latence
-    let queries = ["architecture", "souveraine", "lexicale", "réunion", "Jeanne"];
+    let queries = [
+        "architecture",
+        "souveraine",
+        "lexicale",
+        "réunion",
+        "Jeanne",
+    ];
     let mut latencies = Vec::with_capacity(100);
 
     for (idx, q) in queries.iter().cycle().take(100).enumerate() {
@@ -57,7 +67,10 @@ fn benchmark_bm25_search_latency() {
         let results = storage.search_fts(query_term, 10).expect("Recherche FTS5");
         let elapsed = start.elapsed();
         latencies.push(elapsed);
-        assert!(!results.is_empty(), "La recherche doit retourner des résultats pour '{query_term}'");
+        assert!(
+            !results.is_empty(),
+            "La recherche doit retourner des résultats pour '{query_term}'"
+        );
         assert!(
             results[0].snippet.contains("<mark>"),
             "Le snippet doit contenir le balisage <mark> pour la surbrillance"
@@ -131,13 +144,16 @@ async fn stress_concurrency_and_debouncing_under_load() {
 
     // 3. Attendre la stabilisation de la fenêtre de dé-rebond (300 ms + délai d'attente)
     let start_wait = Instant::now();
-    while watcher.reconciliation_count() == 0 && start_wait.elapsed() < Duration::from_millis(2500) {
+    while watcher.reconciliation_count() == 0 && start_wait.elapsed() < Duration::from_millis(2500)
+    {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
     // Arrêt du lecteur concurrent
     stop_reader.store(true, std::sync::atomic::Ordering::Relaxed);
-    let total_reads = reader_handle.await.expect("Arrêt tâche de lecture concurrente");
+    let total_reads = reader_handle
+        .await
+        .expect("Arrêt tâche de lecture concurrente");
 
     println!("Total concurrent reads during file watcher burst: {total_reads}");
 
@@ -151,7 +167,9 @@ async fn stress_concurrency_and_debouncing_under_load() {
 
     // Assertion 2 : Le contenu final de l'itération 20 est indexé et interrogeable
     let s = storage_arc.lock().expect("Verrou storage");
-    let results = s.search_fts("itération numéro 20", 5).expect("Recherche FTS5 finale");
+    let results = s
+        .search_fts("itération numéro 20", 5)
+        .expect("Recherche FTS5 finale");
     assert_eq!(
         results.len(),
         1,

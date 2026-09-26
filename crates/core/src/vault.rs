@@ -73,12 +73,12 @@ Jeanne est votre assistant de connaissances souverain et local-first ("File-over
     Ok(())
 }
 
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 
 use crate::error::JeanneError;
 use crate::storage::StorageManager;
@@ -97,10 +97,7 @@ pub struct VaultWatcher {
 
 impl VaultWatcher {
     /// Initialise un nouvel observateur pour le chemin de coffre spécifié et le stockage SQLite.
-    pub fn new<P: AsRef<Path>>(
-        vault_path: P,
-        storage: Arc<Mutex<StorageManager>>,
-    ) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(vault_path: P, storage: Arc<Mutex<StorageManager>>) -> Result<Self> {
         Ok(Self {
             vault_path: vault_path.as_ref().to_path_buf(),
             storage,
@@ -327,8 +324,13 @@ async fn reconcile_batch(
 
     if tx_result.is_ok() {
         for item in to_upsert {
-            let (frontmatter, body) = crate::parser::parse_markdown(&item.content)
-                .unwrap_or_else(|_| (crate::models::NoteFrontmatter::default(), item.content.clone()));
+            let (frontmatter, body) =
+                crate::parser::parse_markdown(&item.content).unwrap_or_else(|_| {
+                    (
+                        crate::models::NoteFrontmatter::default(),
+                        item.content.clone(),
+                    )
+                });
             let frontmatter_json = serde_json::to_string(&frontmatter).ok();
 
             if let Err(e) = storage.upsert_file(
@@ -417,7 +419,7 @@ fn normalize_rel_path(vault_path: &Path, file_path: &Path) -> Option<String> {
         }
     }
 
-    file_path.file_name().map(|n| n.to_string_lossy().to_string())
+    file_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
 }
-
-

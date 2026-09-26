@@ -1,0 +1,60 @@
+name: Tauri v2 Matrix Build Check
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'apps/desktop/**'
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/build-check.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tauri-build-check:
+    name: Build Check (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libxdo-dev libayatana-appindicator3-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/core
+            apps/desktop/src-tauri
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd apps/desktop
+          npm ci
+
+      - name: Build Tauri Desktop (No Bundle)
+        run: |
+          cd apps/desktop
+          npx @tauri-apps/cli build --no-bundle

@@ -1,0 +1,78 @@
+name: Packaging & Automated Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-tauri:
+    name: Package (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libxdo-dev libayatana-appindicator3-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/core
+            apps/desktop/src-tauri
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd apps/desktop
+          npm ci
+
+      - name: Build and Package with Tauri Action
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: ./apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Jeanne ${{ github.ref_name }}'
+          releaseBody: 'Release ${{ github.ref_name }} build artifacts (Windows .exe/.msi, Linux .deb/.AppImage, macOS .dmg).'
+          releaseDraft: true
+          prerelease: false
+
+      - name: Compute SHA-256 Checksums
+        shell: bash
+        run: |
+          echo "=== Generating SHA-256 Checksums for packaged bundles ==="
+          mkdir -p checksums
+          BUNDLE_DIR="apps/desktop/src-tauri/target/release/bundle"
+          if [ -d "$BUNDLE_DIR" ]; then
+            find "$BUNDLE_DIR" -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" -o -name "*.dmg" \) -exec sha256sum {} + > "checksums/SHA256SUMS-${{ matrix.platform }}.txt" || true
+            cat "checksums/SHA256SUMS-${{ matrix.platform }}.txt" || true
+          fi
+
+      - name: Upload Platform Checksum Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums-${{ matrix.platform }}
+          path: checksums/

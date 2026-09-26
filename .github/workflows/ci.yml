@@ -1,0 +1,92 @@
+name: Fast Feedback CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  rust-static-and-lint:
+    name: Rust Static Analysis & Anti-Panic Check
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux / WebKitGTK)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format Check (cargo fmt)
+        run: cargo fmt --check
+
+      - name: Anti-Panic Audit (Zero unwrap/expect in crates/core/src)
+        run: |
+          echo "Auditing crates/core/src/ for forbidden unwrap() or expect() calls..."
+          if grep -rn -E '\.(unwrap|expect)\(' crates/core/src/; then
+            echo "::error::Found forbidden unwrap() or expect() call in crates/core/src/! All core domain errors must be handled gracefully via thiserror/anyhow."
+            exit 1
+          fi
+          echo "✅ Zero forbidden unwrap/expect calls detected in crates/core/src/."
+
+      - name: Clippy Strict Check
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  rust-test:
+    name: Engine & Storage Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux / WebKitGTK)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Cargo Tests (Workspace)
+        run: cargo test --workspace --verbose
+
+  frontend:
+    name: Frontend Build & Typecheck (Svelte 5 / TS)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install dependencies & Build Desktop UI
+        run: |
+          cd apps/desktop
+          npm ci
+          npm run build

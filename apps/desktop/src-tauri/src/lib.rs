@@ -5,7 +5,9 @@ use tauri::Manager;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::io::AsyncWriteExt;
 
-use jeanne_core::{IndexedChunk, NoteFrontmatter, SearchResult, StorageManager, VaultStats, VaultWatcher};
+use jeanne_core::{
+    IndexedChunk, NoteFrontmatter, SearchResult, StorageManager, VaultStats, VaultWatcher,
+};
 
 /// État applicatif partagé contenant l'accès sécurisé au moteur SQLite et le chemin racine du coffre.
 pub struct AppState {
@@ -367,7 +369,10 @@ pub fn run() {
             if let Err(err) = watcher.start() {
                 tracing::warn!("Avertissement lors du démarrage du VaultWatcher : {}", err);
             } else {
-                tracing::info!("VaultWatcher démarré avec succès sur {}", vault_path.display());
+                tracing::info!(
+                    "VaultWatcher démarré avec succès sur {}",
+                    vault_path.display()
+                );
             }
 
             app.manage(AppState {
@@ -397,9 +402,15 @@ pub fn run() {
             }
 
             // Enregistrement de l'icône de zone de notification système (System Tray)
-            let quit_i = tauri::menu::MenuItemBuilder::with_id("quit", "Quitter Jeanne").build(app)?;
-            let show_main_i = tauri::menu::MenuItemBuilder::with_id("show_main", "Ouvrir Jeanne").build(app)?;
-            let show_overlay_i = tauri::menu::MenuItemBuilder::with_id("show_overlay", "Palette d'accès rapide (Alt+Espace)").build(app)?;
+            let quit_i =
+                tauri::menu::MenuItemBuilder::with_id("quit", "Quitter Jeanne").build(app)?;
+            let show_main_i =
+                tauri::menu::MenuItemBuilder::with_id("show_main", "Ouvrir Jeanne").build(app)?;
+            let show_overlay_i = tauri::menu::MenuItemBuilder::with_id(
+                "show_overlay",
+                "Palette d'accès rapide (Alt+Espace)",
+            )
+            .build(app)?;
 
             let tray_menu = tauri::menu::MenuBuilder::new(app)
                 .items(&[&show_main_i, &show_overlay_i])
@@ -410,27 +421,27 @@ pub fn run() {
             let mut tray_builder = tauri::tray::TrayIconBuilder::new()
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| {
-                    match event.id().as_ref() {
-                        "quit" => {
-                            tracing::info!("Fermeture de Jeanne demandée depuis le menu de notification.");
-                            clean_exit(app);
-                        }
-                        "show_main" => {
-                            if let Some(win) = app.get_webview_window("main") {
-                                let _ = win.unminimize();
-                                let _ = win.show();
-                                let _ = win.set_focus();
-                            }
-                        }
-                        "show_overlay" => {
-                            if let Some(win) = app.get_webview_window("quick-access") {
-                                let _ = win.show();
-                                let _ = win.set_focus();
-                            }
-                        }
-                        _ => {}
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "quit" => {
+                        tracing::info!(
+                            "Fermeture de Jeanne demandée depuis le menu de notification."
+                        );
+                        clean_exit(app);
                     }
+                    "show_main" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.unminimize();
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                    "show_overlay" => {
+                        if let Some(win) = app.get_webview_window("quick-access") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                    _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click {
@@ -471,7 +482,9 @@ pub fn run() {
             // Fermeture complète et propre de l'application si la fenêtre principale est fermée
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
-                    tracing::info!("Fermeture de la fenêtre principale reçue, arrêt ordonné de Jeanne.");
+                    tracing::info!(
+                        "Fermeture de la fenêtre principale reçue, arrêt ordonné de Jeanne."
+                    );
                     clean_exit(window.app_handle());
                 } else if window.label() == "quick-access" {
                     api.prevent_close();
@@ -661,9 +674,8 @@ mod tests {
     #[test]
     fn test_shortcut_fallback_cascade_all_failed() {
         let candidates = ["Alt+Space", "Alt+Shift+Space", "Ctrl+Shift+Space"];
-        let chosen = register_first_available_shortcut(&candidates, |_| {
-            Err("All conflicts".into())
-        });
+        let chosen =
+            register_first_available_shortcut(&candidates, |_| Err("All conflicts".into()));
         assert_eq!(chosen, None);
     }
 }

@@ -1,7 +1,7 @@
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use jeanne_core::storage::StorageManager;
 use jeanne_core::vault::VaultWatcher;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tempfile::tempdir;
 
 /// TEST-01-03: Dé-rebond du Watcher FS (300 ms)
@@ -36,7 +36,8 @@ async fn test_01_03_watcher_debouncing_window() {
 
     // 2. Attendre l'expiration de la fenêtre de dé-rebond glissante (300 ms + marge pour tolérance OS)
     let start_wait = tokio::time::Instant::now();
-    while watcher.reconciliation_count() == 0 && start_wait.elapsed() < Duration::from_millis(2000) {
+    while watcher.reconciliation_count() == 0 && start_wait.elapsed() < Duration::from_millis(2000)
+    {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
@@ -101,7 +102,9 @@ Ce motclefspecifique doit disparaître complètement lors de la suppression du f
     while start_initial.elapsed() < Duration::from_millis(2000) {
         let count = {
             let s = storage.lock().unwrap();
-            s.search_fts("motclefspecifique", 1).map(|r| r.len()).unwrap_or(0)
+            s.search_fts("motclefspecifique", 1)
+                .map(|r| r.len())
+                .unwrap_or(0)
         };
         if count == 1 {
             break;
@@ -135,7 +138,8 @@ Ce motclefspecifique doit disparaître complètement lors de la suppression du f
                 "SELECT COUNT(*) FROM files WHERE file_path = 'ToDelete.md'",
                 [],
                 |row| row.get(0),
-            ).unwrap_or(1)
+            )
+            .unwrap_or(1)
         };
         if count == 0 {
             break;

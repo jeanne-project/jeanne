@@ -18,3 +18,9 @@ Thumbs.db
 
 # Worktrees
 .worktrees/
+
+# CI / CD & Profiling Artifacts
+checksums/
+coverage/
+*.profraw
+*.profdata
