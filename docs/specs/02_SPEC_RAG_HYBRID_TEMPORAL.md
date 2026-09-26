@@ -2,7 +2,7 @@
 
 ## 1. Overview & Objective
 * **Milestone Identifier & Title**: Milestone 2 — Hybrid Vector Engine & Temporal Decay Relevance.
-* **Core Problem Statement**: Flat semantic vector search inevitably suffers from "Context Rot" — as notes accumulate, outdated decisions carry identical semantic similarity to recent corrections. Milestone 2 implements a hybrid search pipeline combining dense vector embeddings (`sqlite-vec`), lexical matching (`fts5`), and a mathematical time-decay arbitration formula, while enforcing an obsolescence filter.
+* **Core Problem Statement**: Flat semantic vector search inevitably suffers from "Context Rot" — as notes accumulate, outdated decisions carry identical semantic similarity to recent corrections. Milestone 2 implements a hybrid search pipeline combining dense vector embeddings (`sqlite-vec`), lexical matching (`fts5`), and a mathematical time-decay arbitration formula, while enforcing strict semantic obsolescence filtering and 1-hop graph contradiction audits.
 * **Hardware Ceiling**: Resident process RAM must remain strictly **< 200 MB** with the embedding model resident in memory on CPU. Average hybrid search latency must be **< 30 ms** for vaults up to 10,000 chunks.
 * **Dependencies & Tooling**:
   * `crates/core`:
@@ -11,6 +11,7 @@
     * `rusqlite = { version = "0.32", features = ["bundled"] }`
     * `tokio = { version = "1.43", features = ["full"] }`
     * `serde = { version = "1.0", features = ["derive"] }`
+    * `validator = { version = "0.19", features = ["derive"] }`
     * `thiserror = "2.0"`
     * `tracing = "0.1"`
 
@@ -22,7 +23,7 @@
 `sqlite-vec` virtual tables (`vec0`) **strictly require a 64-bit signed integer rowid** as their primary key. Attempting to define `chunk_id TEXT PRIMARY KEY` on a `vec0` table causes a runtime SQL error. Therefore, the relational `chunks` table must maintain an explicit integer primary key (`id INTEGER PRIMARY KEY AUTOINCREMENT`) that maps 1:1 to `vec_chunks.rowid`.
 
 ```sql
--- Relational storage of chunk text and metadata
+-- Relational storage of chunk text and CoALA metadata
 CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chunk_id TEXT UNIQUE NOT NULL,
@@ -30,11 +31,31 @@ CREATE TABLE IF NOT EXISTS chunks (
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
     token_count INTEGER NOT NULL,
-    note_type TEXT NOT NULL, -- 'semantique' | 'episodique' | 'procedural'
-    statut TEXT NOT NULL,    -- 'actif' | 'obsolete' | 'archive'
+    coala_type TEXT NOT NULL,    -- 'procedural' | 'episodic' | 'semantic'
+    status TEXT NOT NULL,        -- 'active' | 'deprecated'
+    superseded_by TEXT,          -- Path or chunk_id of superseding note (NULL if active)
+    deprecated_at INTEGER,       -- Unix epoch timestamp of deprecation (NULL if active)
     date_creation INTEGER NOT NULL,
     FOREIGN KEY(file_path) REFERENCES files(file_path) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_chunks_coala_type ON chunks(coala_type);
+CREATE INDEX IF NOT EXISTS idx_chunks_status ON chunks(status);
+CREATE INDEX IF NOT EXISTS idx_chunks_superseded ON chunks(superseded_by);
+
+-- 1-Hop Graph Links for local contradiction audits and obsolescence propagation
+CREATE TABLE IF NOT EXISTS file_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_path TEXT NOT NULL,
+    target_path TEXT NOT NULL,
+    link_type TEXT NOT NULL,     -- 'wikilink' | 'supersedes' | 'relates'
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(source_path) REFERENCES files(file_path) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_links_source ON file_links(source_path);
+CREATE INDEX IF NOT EXISTS idx_file_links_target ON file_links(target_path);
+CREATE INDEX IF NOT EXISTS idx_file_links_type ON file_links(link_type);
 
 -- Vector virtual table strictly keyed on 64-bit integer rowid
 CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
@@ -63,13 +84,36 @@ $$\text{Final\_Score} = \left( 0.7 \cdot S_{\text{vector}} + 0.3 \cdot S_{\text{
 * $S_{\text{vector}} \in [0.0, 1.0]$: Cosine similarity derived from `sqlite-vec` vector distance (`1.0 - distance`).
 * $S_{\text{BM25}} \in [0.0, 1.0]$: Normalized lexical BM25 score from `fts_notes`.
 * $\Delta t_{\text{days}} = \frac{\text{Now}_{\text{timestamp}} - \text{Date\_Creation}_{\text{timestamp}}}{86400}$.
-* $\lambda$: Decay coefficient configured by note type:
-  * $\lambda = 0.005$ for `semantique` and `episodique` notes.
-  * $\lambda = 0.0$ for `procedural` notes (templates, procedures, and coding guidelines never decay).
+* $\lambda$: Decay coefficient configured strictly by CoALA memory stratum:
+  * $\lambda = 0.0$ for `procedural` notes (templates, procedures, rules, and coding guidelines never decay).
+  * $\lambda = 0.005$ for `semantic` and `episodic` notes (progressive temporal attenuation).
 
 ### 2.4 Rust Interface & Error Domain
 ```rust
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CoalaType {
+    Procedural,
+    Episodic,
+    Semantic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteStatus {
+    Active,
+    Deprecated,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileLink {
+    pub source_path: String,
+    pub target_path: String,
+    pub link_type: String,
+}
 
 #[derive(Debug, Error)]
 pub enum RagError {
@@ -89,8 +133,10 @@ pub struct HybridSearchResult {
     pub vector_score: f64,
     pub bm25_score: f64,
     pub combined_score: f64,
-    pub note_type: String,
-    pub statut: String,
+    pub coala_type: CoalaType,
+    pub status: NoteStatus,
+    pub superseded_by: Option<String>,
+    pub deprecated_at: Option<i64>,
     pub age_days: f64,
 }
 ```
@@ -99,10 +145,13 @@ pub struct HybridSearchResult {
 
 ## 3. Scenarios & Edge Cases
 
-### 3.1 Strict Obsolescence Hard Filter
-* **Rule**: Notes tagged with `statut: "obsolete"` or `statut: "archive"` are strictly excluded from standard RAG retrieval.
-* **SQL Clause**: Queries against `chunks` must enforce `WHERE statut = 'actif'`.
-* **Exception**: Historical audit queries may explicitly bypass this filter by passing an optional flag `include_archived: true`.
+### 3.1 Strict Obsolescence Hard Filter & 1-Hop Graph Invalidation
+* **Rule**: Notes or chunks marked with `status = 'deprecated'` are strictly excluded from standard RAG retrieval.
+* **SQL Clause**: Queries against `chunks` must enforce `WHERE status = 'active'`.
+* **1-Hop Graph Contradiction & Obsolescence Resolution**:
+  - When an active note is matched, a 1-hop inspection of `file_links` audits whether incoming or outgoing `supersedes` links exist.
+  - If a matched note is recorded with `superseded_by IS NOT NULL`, the RAG engine automatically retrieves the superseding document or injects a high-priority deprecation banner into the context window.
+* **Exception**: Historical audit queries may explicitly bypass this filter by passing an optional flag `include_deprecated: true`.
 
 ### 3.2 Circuit Breaker Anti-Hallucination Guardrail
 * **Problem**: In naive RAG pipelines, querying for concepts completely absent from the user's vault still returns the "least distant" chunks. The LLM receives irrelevant context and hallucinates plausible answers.
@@ -111,7 +160,7 @@ pub struct HybridSearchResult {
 ### 3.3 Vector Index Synchronization on File Deletion
 When a markdown file is deleted from disk:
 1. `files` row is deleted.
-2. `chunks` rows are deleted via `ON DELETE CASCADE`.
+2. `chunks` and `file_links` rows are deleted via `ON DELETE CASCADE`.
 3. In the same transaction, corresponding vector rows are purged:
    ```sql
    DELETE FROM vec_chunks WHERE rowid NOT IN (SELECT id FROM chunks);
@@ -125,14 +174,19 @@ When a markdown file is deleted from disk:
 | :--- | :--- | :--- | :--- | :--- |
 | **TEST-02-01** | Binary vector insertion | 384-dimensional synthetic float array | Call `insert_chunk_vector(rowid, embedding)` | Vector correctly stored; query with `vec_distance_cosine` returns exact distance 0.0 for identical vector |
 | **TEST-02-02** | Temporal resolution | Note A (created today, score 0.8), Note B (created 300 days ago, score 0.85) | Execute hybrid search | Note A ranks higher than Note B due to time-decay attenuation ($\lambda = 0.005$) |
-| **TEST-02-03** | Obsolescence filtering | Insert matching note with `statut: "obsolete"` | Execute standard query | Zero results returned; obsolete note is strictly omitted |
+| **TEST-02-03** | Obsolescence filtering | Insert matching note with `status: "deprecated"` and `superseded_by: "note_v2.md"` | Execute standard query | Zero results returned; deprecated note is strictly omitted from standard search |
 | **TEST-02-04** | Anti-hallucination threshold | Query with semantic content completely foreign to test vault | Execute RAG retrieval | Returns `Err(RagError::InformationNotFound)` with similarity < 0.65 |
+| **TEST-02-05** | 1-Hop link graph traversal | Notes linked via `file_links` with `link_type: 'supersedes'` | Query 1-hop neighbors of superseded document | Returns direct successor document path; flags obsolescence conflict |
+| **TEST-02-06** | CoALA type routing & invariant | Procedural note (`coala_type: procedural`, created 400 days ago) vs Episodic note | Compute decay score | Procedural note has attenuation factor $1.0$ ($\lambda = 0.0$); episodic note exhibits decay ($\lambda = 0.005$) |
 
 ---
 
 ## 5. Verification & Sign-off Checklist
 - [ ] `sqlite-vec` extension properly loaded into `rusqlite` connection via `sqlite_vec::init()`.
 - [ ] Primary key on `vec_chunks` strictly validated as 64-bit integer `rowid`.
+- [ ] Table `file_links` created with indices on `source_path`, `target_path`, `link_type`.
+- [ ] Obsolescence fields (`status`, `superseded_by`, `deprecated_at`) and `coala_type` properly typed and filtered.
+- [ ] Frontmatter validated natively in Rust (`serde`, `validator`) without Python/Pydantic runtime.
 - [ ] Memory benchmark: Resident process RAM `< 200 MB` with `BGESmallENV15` active in memory.
 - [ ] Procedural notes ($\lambda = 0.0$) retain 100% of score regardless of age.
 - [ ] Zero database corruption or orphaned vectors after 100 concurrent insertions and deletions.
