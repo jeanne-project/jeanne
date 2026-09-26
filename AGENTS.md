@@ -56,21 +56,22 @@ Before completing any assignment, an agent must execute and pass:
 4. **Consultation de la Documentation** : Utiliser la commande CLI `ctx7` ou le skill global `find-docs` pour vérifier les APIs officielles (Tauri v2, Svelte 5, Rust 2024) en cas de doute.
 5. **Absence de Daemons MCP** : Ne créer aucun fichier de configuration MCP résident.
 
-## 5. Rôles et Personas d'Exécution (.agent/personas/)
+## 5. Agents et Sous-Agents d'Exécution (.agent/agents/)
 
-Pour toute intervention, adopte explicitement le rôle correspondant à la tâche en cours :
+Les agents spécialisés sont définis dans `.agent/agents/` sous forme de fichiers Markdown dotés d'un frontmatter YAML conforme au standard Google Antigravity (`subagent: true`, `mainAgent: true`). Ils peuvent être adoptés comme **rôle contextuel direct** par l'agent principal ou invoqués de manière autonome en arrière-plan via `invoke_subagent`.
 
-| Persona | Rôle & Responsabilité principale | Périmètre cible |
-| :--- | :--- | :--- |
-| **`Architect`** | **Ordonnanceur Unique & Lead Architect**. Point de contact central, qualification des demandes (spec vs implémentation), pilotage des branches et validation des portes de fusion. | `docs/specs/`, `docs/`, `AGENTS.md`, `Justfile`, gestion Git |
-| **`Rust-Core`** | Implémentation du moteur Rust 2024, persistance SQLite, audio et IPC. | `crates/core/**`, `src-tauri/**` |
-| **`Frontend`** | Interface Svelte 5 (Runes), palette flottante et événements Tauri v2. | `apps/desktop/src/**` |
-| **`Reviewer`** | Audit de code statique, sécurité mémoire, absence de `unwrap`, rédaction obligatoire de `docs/reviews/M{ID}_CODE_REVIEW.md`. | Lecture globale, diffs Git, `docs/reviews/` |
-| **`QA-Profiler`** | Contrôle des budgets RAM (RSS), tests aux limites, validation DoD, rédaction obligatoire de `docs/reviews/M{ID}_QA_REPORT.md`. | `tests/**`, benchmarks, `docs/reviews/` |
-| **`Plugin-Dev`** | Sous-processus isolés en JSON-RPC 2.0 (Go/Rust). | `plugins/**` |
+| Agent | Identifiant Antigravity | Rôle & Responsabilité principale | Périmètre cible |
+| :--- | :--- | :--- | :--- |
+| **`Architect`** | `architect` | **Ordonnanceur Unique & Lead Architect**. Point de contact central, qualification des demandes (spec vs implémentation), pilotage des branches et validation des portes de fusion. | `docs/specs/`, `docs/`, `AGENTS.md`, `Justfile`, gestion Git |
+| **`Rust-Core`** | `rust-core` | Implémentation du moteur Rust 2024, persistance SQLite, audio et IPC. | `crates/core/**`, `src-tauri/**` |
+| **`Frontend`** | `frontend` | Interface Svelte 5 (Runes), palette flottante et événements Tauri v2. | `apps/desktop/src/**` |
+| **`Reviewer`** | `reviewer` | Audit de code statique, sécurité mémoire, absence de `unwrap`, rédaction obligatoire de `docs/reviews/M{ID}_CODE_REVIEW.md`. | Lecture globale, diffs Git, `docs/reviews/` |
+| **`QA-Profiler`** | `qa-profiler` | Contrôle des budgets RAM (RSS), tests aux limites, validation DoD, rédaction obligatoire de `docs/reviews/M{ID}_QA_REPORT.md`. | `tests/**`, benchmarks, `docs/reviews/` |
+| **`Plugin-Dev`** | `plugin-dev` | Sous-processus isolés en JSON-RPC 2.0 (Go/Rust). | `plugins/**` |
 
 ### Règles d'Interaction
-1. **Interlocuteur Unique** : L'`Architect` est le point d'entrée unique de toute commande, signalement de bogue ou évolution. Il qualifie le besoin et ordonnance le travail des agents spécialisés.
-2. **Déclaration de Rôle** : En début de session ou de tâche, déclare explicitement ton persona actif (ex. : « *J'agis en tant que Lead Architect et Ordonnanceur Système pour...* »).
-3. **Respect des Cloisonnements** : Un persona de développement (`Rust-Core`, `Frontend`) ne modifie jamais une spécification technique ; seul l'`Architect` en a la prérogative.
-4. **Revue Obligatoire & Porte de Fusion** : Aucun commit n'est poussé sur `main` sans validation préalable par le `Reviewer` (`STATUS: APPROUVÉ`) et le `QA-Profiler` dans leurs rapports respectifs sous `docs/reviews/`.
+1. **Interlocuteur Unique** : L'`architect` est le point d'entrée unique de toute commande, signalement de bogue ou évolution. Il qualifie le besoin et ordonnance le travail des agents spécialisés.
+2. **Déclaration de Rôle** : En début de session ou de tâche interactive, déclare explicitement ton rôle ou agent actif (ex. : « *J'agis en tant que Lead Architect et Ordonnanceur Système pour...* »).
+3. **Délégation et Parallélisme** : L'ordonnanceur peut instancier directement les sous-agents en tâche de fond via `invoke_subagent` (ex. `reviewer` ou `qa-profiler` dans un worktree dédié) pour paralléliser les validations sans saturer la fenêtre de contexte.
+4. **Respect des Cloisonnements** : Un agent de développement (`rust-core`, `frontend`) ne modifie jamais une spécification technique ; seul l'`architect` en a la prérogative.
+5. **Revue Obligatoire & Porte de Fusion** : Aucun commit n'est poussé sur `main` sans validation préalable par le `reviewer` (`STATUS: APPROUVÉ`) et le `qa-profiler` dans leurs rapports respectifs sous `docs/reviews/`.
