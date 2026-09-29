@@ -14,7 +14,7 @@
 
 use jeanne_core::error::RagError;
 use jeanne_core::models::{CoalaType, FileLink, IndexedChunk, NoteStatus};
-use jeanne_core::rag::{check_circuit_breaker, RagEngine, SIMILARITY_THRESHOLD};
+use jeanne_core::rag::{RagEngine, SIMILARITY_THRESHOLD, check_circuit_breaker};
 use jeanne_core::storage::StorageManager;
 use std::sync::{Arc, Mutex};
 
@@ -64,15 +64,21 @@ fn test_adv_cb_01_unit_threshold_fine_boundaries() {
     // Strictly below 0.65 -> Must return Err(RagError::InformationNotFound)
     assert_eq!(
         check_circuit_breaker(0.64999),
-        Err(RagError::InformationNotFound { similarity: 0.64999 })
+        Err(RagError::InformationNotFound {
+            similarity: 0.64999
+        })
     );
     assert_eq!(
         check_circuit_breaker(0.6499999),
-        Err(RagError::InformationNotFound { similarity: 0.6499999 })
+        Err(RagError::InformationNotFound {
+            similarity: 0.6499999
+        })
     );
     assert_eq!(
         check_circuit_breaker(0.64000),
-        Err(RagError::InformationNotFound { similarity: 0.64000 })
+        Err(RagError::InformationNotFound {
+            similarity: 0.64000
+        })
     );
 
     // Exactly at threshold or above -> Must return Ok(())
@@ -89,7 +95,9 @@ fn test_adv_cb_01_unit_threshold_fine_boundaries() {
     );
     assert_eq!(
         check_circuit_breaker(f32::NEG_INFINITY),
-        Err(RagError::InformationNotFound { similarity: f32::NEG_INFINITY })
+        Err(RagError::InformationNotFound {
+            similarity: f32::NEG_INFINITY
+        })
     );
     assert!(check_circuit_breaker(f32::INFINITY).is_ok());
 }
@@ -115,7 +123,9 @@ fn test_adv_cb_02_sqlite_vec_threshold_boundaries_end_to_end() {
 
     // Stored vector along basis 0
     let v_doc = make_basis_vector(0);
-    storage.insert_chunk_vector(rowid, &v_doc).expect("insert vector");
+    storage
+        .insert_chunk_vector(rowid, &v_doc)
+        .expect("insert vector");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -133,7 +143,9 @@ fn test_adv_cb_02_sqlite_vec_threshold_boundaries_end_to_end() {
                 "Similarity should match query target within float tolerance, got {similarity}"
             );
         }
-        Ok(results) => panic!("Expected circuit breaker trigger, but search succeeded: {results:?}"),
+        Ok(results) => {
+            panic!("Expected circuit breaker trigger, but search succeeded: {results:?}")
+        }
         Err(e) => panic!("Unexpected error variant: {e:?}"),
     }
 
@@ -170,7 +182,9 @@ fn test_adv_cb_03_negative_similarities_unit_and_extremes() {
     );
     assert_eq!(
         check_circuit_breaker(-0.0001),
-        Err(RagError::InformationNotFound { similarity: -0.0001 })
+        Err(RagError::InformationNotFound {
+            similarity: -0.0001
+        })
     );
     assert_eq!(
         check_circuit_breaker(-1e20),
@@ -199,7 +213,9 @@ fn test_adv_cb_04_diametrically_opposed_vectors_sqlite_vec_end_to_end() {
 
     // Stored vector = +basis_0
     let v_pos = make_basis_vector(0);
-    storage.insert_chunk_vector(rowid, &v_pos).expect("insert vector");
+    storage
+        .insert_chunk_vector(rowid, &v_pos)
+        .expect("insert vector");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -276,10 +292,7 @@ fn test_adv_cb_06_empty_vault_fresh_database() {
     let query_vec = make_basis_vector(0);
     let res = engine.search("any query", &query_vec, 10);
 
-    assert_eq!(
-        res,
-        Err(RagError::InformationNotFound { similarity: 0.0 })
-    );
+    assert_eq!(res, Err(RagError::InformationNotFound { similarity: 0.0 }));
 }
 
 #[test]
@@ -335,7 +348,9 @@ fn test_adv_cb_08_purged_vault_after_cascade_delete() {
         );
         let rowid = guard.index_chunk(&chunk).expect("index");
         let vec = make_basis_vector(0);
-        guard.insert_chunk_vector(rowid, &vec).expect("insert vector");
+        guard
+            .insert_chunk_vector(rowid, &vec)
+            .expect("insert vector");
     }
 
     let engine = RagEngine::new(storage.clone());
@@ -376,7 +391,9 @@ fn test_adv_cb_09_limit_zero_boundary() {
     );
     let rowid = storage.index_chunk(&chunk).expect("index");
     let vec = make_basis_vector(0);
-    storage.insert_chunk_vector(rowid, &vec).expect("insert vec");
+    storage
+        .insert_chunk_vector(rowid, &vec)
+        .expect("insert vec");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -410,7 +427,9 @@ fn test_adv_cb_10_high_bm25_orthogonal_vector_vetoed() {
 
     // Stored vector along basis 0
     let v_stored = make_basis_vector(0);
-    storage.insert_chunk_vector(rowid, &v_stored).expect("insert vector");
+    storage
+        .insert_chunk_vector(rowid, &v_stored)
+        .expect("insert vector");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -456,7 +475,9 @@ fn test_adv_cb_11_high_bm25_low_vector_similarity_050_vetoed() {
     );
     let rowid = storage.index_chunk(&chunk).expect("index");
     let v_stored = make_basis_vector(0);
-    storage.insert_chunk_vector(rowid, &v_stored).expect("insert vec");
+    storage
+        .insert_chunk_vector(rowid, &v_stored)
+        .expect("insert vec");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -501,7 +522,9 @@ fn test_adv_cb_12_high_bm25_near_threshold_06499_vetoed() {
     );
     let rowid = storage.index_chunk(&chunk).expect("index");
     let v_stored = make_basis_vector(0);
-    storage.insert_chunk_vector(rowid, &v_stored).expect("insert vec");
+    storage
+        .insert_chunk_vector(rowid, &v_stored)
+        .expect("insert vec");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -548,7 +571,9 @@ fn test_adv_obs_13_single_deprecated_note_near_perfect_similarity_omitted() {
 
     // Vector similarity near-perfect: 0.999
     let v_near_perfect = make_unit_vector_at_similarity(0.999);
-    storage.insert_chunk_vector(rowid, &v_near_perfect).expect("insert vector");
+    storage
+        .insert_chunk_vector(rowid, &v_near_perfect)
+        .expect("insert vector");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -593,7 +618,9 @@ fn test_adv_obs_14_deprecated_near_perfect_vs_active_moderate_strict_omission() 
     );
     let r_dep = storage.index_chunk(&c_dep).expect("index");
     let v_dep = make_unit_vector_at_similarity(0.99);
-    storage.insert_chunk_vector(r_dep, &v_dep).expect("insert vec");
+    storage
+        .insert_chunk_vector(r_dep, &v_dep)
+        .expect("insert vec");
 
     // Active note with moderate similarity (0.75)
     storage
@@ -611,7 +638,9 @@ fn test_adv_obs_14_deprecated_near_perfect_vs_active_moderate_strict_omission() 
     );
     let r_act = storage.index_chunk(&c_act).expect("index");
     let v_act = make_unit_vector_at_similarity(0.75);
-    storage.insert_chunk_vector(r_act, &v_act).expect("insert vec");
+    storage
+        .insert_chunk_vector(r_act, &v_act)
+        .expect("insert vec");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -658,7 +687,9 @@ fn test_adv_obs_15_deprecated_note_with_superseded_by_metadata() {
     storage.insert_chunk_vector(rid, &vec).expect("insert vec");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
-    let results = engine.search("architecture deployment", &vec, 10).expect("search");
+    let results = engine
+        .search("architecture deployment", &vec, 10)
+        .expect("search");
 
     // Standard search: deprecated note must be omitted even if superseded_by is populated
     assert!(
@@ -739,7 +770,9 @@ fn test_adv_fts_17_adversarial_queries_in_rag_search() {
     );
     let rowid = storage.index_chunk(&chunk).expect("index");
     let vec = make_basis_vector(0);
-    storage.insert_chunk_vector(rowid, &vec).expect("insert vec");
+    storage
+        .insert_chunk_vector(rowid, &vec)
+        .expect("insert vec");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -765,7 +798,6 @@ fn test_adv_fts_17_adversarial_queries_in_rag_search() {
         );
     }
 }
-
 
 #[test]
 fn test_adv_obs_18_candidate_k_window_saturation_by_deprecated_notes() {
@@ -836,4 +868,3 @@ fn test_adv_obs_18_candidate_k_window_saturation_by_deprecated_notes() {
     );
     assert!(res_large_k.iter().all(|r| r.status == NoteStatus::Active));
 }
-

@@ -228,7 +228,8 @@ pub struct TestDbHarness {
 impl TestDbHarness {
     pub fn open_in_memory() -> Self {
         let conn = Connection::open_in_memory().expect("open in-memory test db");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("enable fk");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("enable fk");
         let mut harness = Self {
             conn,
             vectors: HashMap::new(),
@@ -399,7 +400,10 @@ impl TestDbHarness {
         Ok(())
     }
 
-    pub fn get_superseding_file(&self, target_path: &str) -> Result<Option<String>, rusqlite::Error> {
+    pub fn get_superseding_file(
+        &self,
+        target_path: &str,
+    ) -> Result<Option<String>, rusqlite::Error> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT target_path FROM file_links
@@ -1090,7 +1094,10 @@ fn test_tier1_f3_02_multi_term_bm25_relevance() {
             |r| r.get(0),
         )
         .expect("top bm25");
-    assert_eq!(top_chunk, "c_high", "Chunk with higher term frequency must rank first in BM25");
+    assert_eq!(
+        top_chunk, "c_high",
+        "Chunk with higher term frequency must rank first in BM25"
+    );
 }
 
 #[test]
@@ -1137,7 +1144,10 @@ fn test_tier1_f3_04_fts5_special_characters_sanitization() {
 #[test]
 fn test_tier1_f3_05_bm25_score_normalized_to_unit_range() {
     let s_bm25 = 0.85f64;
-    assert!((0.0..=1.0).contains(&s_bm25), "Normalized BM25 must be in [0, 1]");
+    assert!(
+        (0.0..=1.0).contains(&s_bm25),
+        "Normalized BM25 must be in [0, 1]"
+    );
 }
 
 // Feature 4: Time-Decay Attenuation Formula
@@ -1171,9 +1181,15 @@ fn test_tier1_f4_04_fresh_note_decay_factor_unity() {
 #[test]
 fn test_tier1_f4_05_combined_score_weighting_70_30() {
     let score = compute_hybrid_decay_score(1.0, 0.0, CoalaType::Procedural, 0.0);
-    assert!((score - 0.70).abs() < 1e-6, "Pure vector match must contribute 0.7");
+    assert!(
+        (score - 0.70).abs() < 1e-6,
+        "Pure vector match must contribute 0.7"
+    );
     let score_lex = compute_hybrid_decay_score(0.0, 1.0, CoalaType::Procedural, 0.0);
-    assert!((score_lex - 0.30).abs() < 1e-6, "Pure lexical match must contribute 0.3");
+    assert!(
+        (score_lex - 0.30).abs() < 1e-6,
+        "Pure lexical match must contribute 0.3"
+    );
 }
 
 // Feature 5: Obsolescence Filtering & 1-Hop Graph Traversal
@@ -1196,7 +1212,9 @@ fn test_tier1_f5_01_deprecated_note_omitted_from_standard_search() {
             Some(&v),
         )
         .expect("insert");
-    let results = harness.execute_hybrid_search("old", &v, 100, 5).expect("search");
+    let results = harness
+        .execute_hybrid_search("old", &v, 100, 5)
+        .expect("search");
     assert!(results.is_empty());
 }
 
@@ -1219,7 +1237,9 @@ fn test_tier1_f5_02_active_note_included_in_standard_search() {
             Some(&v),
         )
         .expect("insert");
-    let results = harness.execute_hybrid_search("new", &v, 100, 5).expect("search");
+    let results = harness
+        .execute_hybrid_search("new", &v, 100, 5)
+        .expect("search");
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].chunk_id, "act1");
 }
@@ -1254,17 +1274,17 @@ fn test_tier1_f5_05_unrelated_link_types_ignored() {
         .insert_file_link("docA.md", "docC.md", "relates", 200)
         .expect("relates");
     let res = harness.get_superseding_file("docA.md").expect("query");
-    assert_eq!(res, None, "wikilink or relates must not trigger obsolescence replacement");
+    assert_eq!(
+        res, None,
+        "wikilink or relates must not trigger obsolescence replacement"
+    );
 }
 
 // Feature 6: Anti-Hallucination Circuit Breaker
 #[test]
 fn test_tier1_f6_01_circuit_breaker_triggers_below_065() {
     let res = check_circuit_breaker(0.64);
-    assert_eq!(
-        res,
-        Err(RagError::InformationNotFound { similarity: 0.64 })
-    );
+    assert_eq!(res, Err(RagError::InformationNotFound { similarity: 0.64 }));
 }
 
 #[test]
@@ -1300,18 +1320,57 @@ fn test_tier1_f6_05_multi_candidate_circuit_breaker_evaluates_max() {
     let v_high = make_synthetic_vector_with_similarity(0.72);
 
     harness
-        .insert_chunk("c1", "f1.md", 0, "text", 1, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&v_low))
+        .insert_chunk(
+            "c1",
+            "f1.md",
+            0,
+            "text",
+            1,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            100,
+            Some(&v_low),
+        )
         .unwrap();
     harness
-        .insert_chunk("c2", "f2.md", 0, "text", 1, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&v_mid))
+        .insert_chunk(
+            "c2",
+            "f2.md",
+            0,
+            "text",
+            1,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            100,
+            Some(&v_mid),
+        )
         .unwrap();
     harness
-        .insert_chunk("c3", "f3.md", 0, "text", 1, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&v_high))
+        .insert_chunk(
+            "c3",
+            "f3.md",
+            0,
+            "text",
+            1,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            100,
+            Some(&v_high),
+        )
         .unwrap();
 
     let query = make_basis_vector(0);
     let res = harness.execute_hybrid_search("text", &query, 100, 5);
-    assert!(res.is_ok(), "Because max similarity is 0.72 >= 0.65, circuit breaker must pass");
+    assert!(
+        res.is_ok(),
+        "Because max similarity is 0.72 >= 0.65, circuit breaker must pass"
+    );
 }
 
 // Feature 7: Cascade Deletion & Orphan Synchronization
@@ -1326,7 +1385,19 @@ fn test_tier1_f7_01_delete_file_cascades_chunks() {
         )
         .unwrap();
     harness
-        .insert_chunk("c1", "f1.md", 0, "content", 1, CoalaType::Semantic, NoteStatus::Active, None, None, 100, None)
+        .insert_chunk(
+            "c1",
+            "f1.md",
+            0,
+            "content",
+            1,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            100,
+            None,
+        )
         .unwrap();
 
     harness.delete_file("f1.md").unwrap();
@@ -1347,7 +1418,9 @@ fn test_tier1_f7_02_delete_file_cascades_file_links() {
             [],
         )
         .unwrap();
-    harness.insert_file_link("f1.md", "f2.md", "supersedes", 100).unwrap();
+    harness
+        .insert_file_link("f1.md", "f2.md", "supersedes", 100)
+        .unwrap();
 
     harness.delete_file("f1.md").unwrap();
     let remaining_links: i64 = harness
@@ -1369,7 +1442,19 @@ fn test_tier1_f7_03_delete_file_purges_virtual_vec_chunks() {
         )
         .unwrap();
     let id = harness
-        .insert_chunk("c1", "f1.md", 0, "content", 1, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&v))
+        .insert_chunk(
+            "c1",
+            "f1.md",
+            0,
+            "content",
+            1,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            100,
+            Some(&v),
+        )
         .unwrap();
 
     assert!(harness.vectors.contains_key(&id));
@@ -1387,10 +1472,17 @@ fn test_tier1_f7_04_explicit_orphan_cleanup_removes_unindexed_vectors() {
 
     // Run orphan cleanup:
     let mut stmt = harness.conn.prepare("SELECT id FROM chunks").unwrap();
-    let active_ids: Vec<i64> = stmt.query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+    let active_ids: Vec<i64> = stmt
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
     harness.vectors.retain(|id, _| active_ids.contains(id));
 
-    assert!(!harness.vectors.contains_key(&999), "Orphan row 999 must be purged");
+    assert!(
+        !harness.vectors.contains_key(&999),
+        "Orphan row 999 must be purged"
+    );
 }
 
 #[test]
@@ -1411,7 +1503,10 @@ fn test_tier2_v_01_all_zeros_synthetic_vector() {
     let norm = vector_norm(&zero_vec);
     assert_eq!(norm, 0.0);
     let sim = cosine_similarity(&zero_vec, &make_basis_vector(0));
-    assert_eq!(sim, 0.0, "Zero vector cosine similarity must return 0.0 safely without NaN");
+    assert_eq!(
+        sim, 0.0,
+        "Zero vector cosine similarity must return 0.0 safely without NaN"
+    );
 }
 
 #[test]
@@ -1420,7 +1515,10 @@ fn test_tier2_v_02_epsilon_perturbed_vectors() {
     let mut v2 = make_basis_vector(0);
     v2[1] = 1e-2; // Epsilon perturbation distinguishable in f32
     let dist = cosine_distance(&v1, &v2);
-    assert!(dist > 0.0 && dist < 1e-3, "Distance should be tiny positive, got {dist}");
+    assert!(
+        dist > 0.0 && dist < 1e-3,
+        "Distance should be tiny positive, got {dist}"
+    );
 }
 
 #[test]
@@ -1458,7 +1556,11 @@ fn test_tier2_v_05_k_greater_than_total_stored_vectors() {
     let mut harness = TestDbHarness::open_in_memory();
     harness.vectors.insert(1, make_basis_vector(0));
     let results = harness.search_vector(&make_basis_vector(0), 100);
-    assert_eq!(results.len(), 1, "Must return available count without crashing");
+    assert_eq!(
+        results.len(),
+        1,
+        "Must return available count without crashing"
+    );
 }
 
 // Temporal Boundaries
@@ -1475,21 +1577,30 @@ fn test_tier2_t_02_large_age_10_years() {
     // Divisor: 1 + 0.005 * 3650 = 1 + 18.25 = 19.25
     let expected = 1.0 / 19.25;
     assert!((score - expected).abs() < 1e-5);
-    assert!(score > 0.0, "Score must remain strictly positive and non-zero");
+    assert!(
+        score > 0.0,
+        "Score must remain strictly positive and non-zero"
+    );
 }
 
 #[test]
 fn test_tier2_t_03_future_timestamp_clamping() {
     // Negative delta_t should clamp to 0.0, avoiding divisor < 1.0
     let score = compute_hybrid_decay_score(0.8, 0.8, CoalaType::Semantic, -50.0);
-    assert!((score - 0.8).abs() < 1e-5, "Future timestamp must clamp delta_t to 0.0");
+    assert!(
+        (score - 0.8).abs() < 1e-5,
+        "Future timestamp must clamp delta_t to 0.0"
+    );
 }
 
 #[test]
 fn test_tier2_t_04_procedural_age_50_years() {
     let score = compute_hybrid_decay_score(0.95, 0.90, CoalaType::Procedural, 18250.0);
     let expected = 0.7 * 0.95 + 0.3 * 0.90;
-    assert!((score - expected).abs() < 1e-6, "Procedural note must never decay even after 50 years");
+    assert!(
+        (score - expected).abs() < 1e-6,
+        "Procedural note must never decay even after 50 years"
+    );
 }
 
 #[test]
@@ -1504,27 +1615,45 @@ fn test_tier2_t_05_half_life_exact_verification() {
 #[test]
 fn test_tier2_o_01_circular_supersedes_link() {
     let harness = TestDbHarness::open_in_memory();
-    harness.insert_file_link("A.md", "B.md", "supersedes", 100).unwrap();
-    harness.insert_file_link("B.md", "A.md", "supersedes", 100).unwrap();
+    harness
+        .insert_file_link("A.md", "B.md", "supersedes", 100)
+        .unwrap();
+    harness
+        .insert_file_link("B.md", "A.md", "supersedes", 100)
+        .unwrap();
 
     let next = harness.get_superseding_file("A.md").unwrap();
-    assert_eq!(next, Some("B.md".to_string()), "1-hop query must safely return direct link without loop");
+    assert_eq!(
+        next,
+        Some("B.md".to_string()),
+        "1-hop query must safely return direct link without loop"
+    );
 }
 
 #[test]
 fn test_tier2_o_02_multi_hop_chain_resolved_to_one_hop() {
     let harness = TestDbHarness::open_in_memory();
-    harness.insert_file_link("v1.md", "v2.md", "supersedes", 100).unwrap();
-    harness.insert_file_link("v2.md", "v3.md", "supersedes", 100).unwrap();
+    harness
+        .insert_file_link("v1.md", "v2.md", "supersedes", 100)
+        .unwrap();
+    harness
+        .insert_file_link("v2.md", "v3.md", "supersedes", 100)
+        .unwrap();
 
     let direct = harness.get_superseding_file("v1.md").unwrap();
-    assert_eq!(direct, Some("v2.md".to_string()), "1-hop contract resolves direct neighbor v2.md");
+    assert_eq!(
+        direct,
+        Some("v2.md".to_string()),
+        "1-hop contract resolves direct neighbor v2.md"
+    );
 }
 
 #[test]
 fn test_tier2_o_03_self_referential_supersedes() {
     let harness = TestDbHarness::open_in_memory();
-    harness.insert_file_link("self.md", "self.md", "supersedes", 100).unwrap();
+    harness
+        .insert_file_link("self.md", "self.md", "supersedes", 100)
+        .unwrap();
     let res = harness.get_superseding_file("self.md").unwrap();
     assert_eq!(res, Some("self.md".to_string()));
 }
@@ -1541,9 +1670,18 @@ fn test_tier2_o_05_case_insensitive_status_parsing() {
     assert_eq!(NoteStatus::from_str_lenient("Active"), NoteStatus::Active);
     assert_eq!(NoteStatus::from_str_lenient("ACTIVE"), NoteStatus::Active);
     assert_eq!(NoteStatus::from_str_lenient("actif"), NoteStatus::Active);
-    assert_eq!(NoteStatus::from_str_lenient("DEPRECATED"), NoteStatus::Deprecated);
-    assert_eq!(NoteStatus::from_str_lenient("obsolete"), NoteStatus::Deprecated);
-    assert_eq!(NoteStatus::from_str_lenient("archive"), NoteStatus::Deprecated);
+    assert_eq!(
+        NoteStatus::from_str_lenient("DEPRECATED"),
+        NoteStatus::Deprecated
+    );
+    assert_eq!(
+        NoteStatus::from_str_lenient("obsolete"),
+        NoteStatus::Deprecated
+    );
+    assert_eq!(
+        NoteStatus::from_str_lenient("archive"),
+        NoteStatus::Deprecated
+    );
 }
 
 // Circuit Breaker Threshold Boundaries
@@ -1591,7 +1729,10 @@ fn test_tier2_cd_01_delete_file_with_zero_chunks() {
     let mut harness = TestDbHarness::open_in_memory();
     harness
         .conn
-        .execute("INSERT INTO files (file_path, file_hash, last_modified) VALUES ('empty.md', 'h', 1)", [])
+        .execute(
+            "INSERT INTO files (file_path, file_hash, last_modified) VALUES ('empty.md', 'h', 1)",
+            [],
+        )
         .unwrap();
     assert!(harness.delete_file("empty.md").is_ok());
 }
@@ -1601,13 +1742,28 @@ fn test_tier2_cd_02_delete_file_with_50_chunks() {
     let mut harness = TestDbHarness::open_in_memory();
     harness
         .conn
-        .execute("INSERT INTO files (file_path, file_hash, last_modified) VALUES ('big.md', 'h', 1)", [])
+        .execute(
+            "INSERT INTO files (file_path, file_hash, last_modified) VALUES ('big.md', 'h', 1)",
+            [],
+        )
         .unwrap();
 
     for i in 0..50 {
         let v = make_basis_vector(i % 384);
         harness
-            .insert_chunk(&format!("c_{i}"), "big.md", i, "chunk text", 2, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&v))
+            .insert_chunk(
+                &format!("c_{i}"),
+                "big.md",
+                i,
+                "chunk text",
+                2,
+                CoalaType::Semantic,
+                NoteStatus::Active,
+                None,
+                None,
+                100,
+                Some(&v),
+            )
             .unwrap();
     }
     assert_eq!(harness.vectors.len(), 50);
@@ -1620,11 +1776,19 @@ fn test_tier2_cd_03_delete_file_cascades_target_links() {
     let mut harness = TestDbHarness::open_in_memory();
     harness
         .conn
-        .execute("INSERT INTO files (file_path, file_hash, last_modified) VALUES ('source.md', 'h', 1)", [])
+        .execute(
+            "INSERT INTO files (file_path, file_hash, last_modified) VALUES ('source.md', 'h', 1)",
+            [],
+        )
         .unwrap();
-    harness.insert_file_link("source.md", "target.md", "supersedes", 100).unwrap();
+    harness
+        .insert_file_link("source.md", "target.md", "supersedes", 100)
+        .unwrap();
     harness.delete_file("source.md").unwrap();
-    let count: i64 = harness.conn.query_row("SELECT COUNT(*) FROM file_links", [], |r| r.get(0)).unwrap();
+    let count: i64 = harness
+        .conn
+        .query_row("SELECT COUNT(*) FROM file_links", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(count, 0);
 }
 
@@ -1633,24 +1797,57 @@ fn test_tier2_cd_04_reindex_updated_file_purges_old_vectors() {
     let mut harness = TestDbHarness::open_in_memory();
     harness
         .conn
-        .execute("INSERT INTO files (file_path, file_hash, last_modified) VALUES ('update.md', 'h1', 1)", [])
+        .execute(
+            "INSERT INTO files (file_path, file_hash, last_modified) VALUES ('update.md', 'h1', 1)",
+            [],
+        )
         .unwrap();
 
     let id1 = harness
-        .insert_chunk("c1", "update.md", 0, "old content", 2, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&make_basis_vector(0)))
+        .insert_chunk(
+            "c1",
+            "update.md",
+            0,
+            "old content",
+            2,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            100,
+            Some(&make_basis_vector(0)),
+        )
         .unwrap();
 
     // Re-index: delete old chunks and insert new
-    harness.conn.execute("DELETE FROM chunks WHERE file_path = 'update.md'", []).unwrap();
+    harness
+        .conn
+        .execute("DELETE FROM chunks WHERE file_path = 'update.md'", [])
+        .unwrap();
     let active_ids: Vec<i64> = {
         let mut stmt = harness.conn.prepare("SELECT id FROM chunks").unwrap();
-        stmt.query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap()
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
     };
     harness.vectors.retain(|id, _| active_ids.contains(id));
     assert!(!harness.vectors.contains_key(&id1));
 
     let id2 = harness
-        .insert_chunk("c1_new", "update.md", 0, "new content", 2, CoalaType::Semantic, NoteStatus::Active, None, None, 200, Some(&make_basis_vector(1)))
+        .insert_chunk(
+            "c1_new",
+            "update.md",
+            0,
+            "new content",
+            2,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            200,
+            Some(&make_basis_vector(1)),
+        )
         .unwrap();
     assert!(harness.vectors.contains_key(&id2));
 }
@@ -1662,10 +1859,25 @@ fn test_tier2_cd_05_delete_all_files_leaves_empty_database() {
         let path = format!("file_{i}.md");
         harness
             .conn
-            .execute("INSERT INTO files (file_path, file_hash, last_modified) VALUES (?1, 'h', 1)", rusqlite::params![path])
+            .execute(
+                "INSERT INTO files (file_path, file_hash, last_modified) VALUES (?1, 'h', 1)",
+                rusqlite::params![path],
+            )
             .unwrap();
         harness
-            .insert_chunk(&format!("c_{i}"), &path, 0, "txt", 1, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&make_basis_vector(i)))
+            .insert_chunk(
+                &format!("c_{i}"),
+                &path,
+                0,
+                "txt",
+                1,
+                CoalaType::Semantic,
+                NoteStatus::Active,
+                None,
+                None,
+                100,
+                Some(&make_basis_vector(i)),
+            )
             .unwrap();
     }
     assert_eq!(harness.vectors.len(), 3);
@@ -1674,7 +1886,10 @@ fn test_tier2_cd_05_delete_all_files_leaves_empty_database() {
         harness.delete_file(&format!("file_{i}.md")).unwrap();
     }
     assert_eq!(harness.vectors.len(), 0);
-    let chunk_count: i64 = harness.conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0)).unwrap();
+    let chunk_count: i64 = harness
+        .conn
+        .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(chunk_count, 0);
 }
 
@@ -1689,14 +1904,40 @@ fn test_tier3_p1_deprecated_high_similarity_vs_active_moderate() {
     let v_act = make_synthetic_vector_with_similarity(0.70);
 
     harness
-        .insert_chunk("c_dep", "deprecated.md", 0, "Rust 2018 edition tips", 4, CoalaType::Semantic, NoteStatus::Deprecated, Some("active.md"), None, 100, Some(&v_dep))
+        .insert_chunk(
+            "c_dep",
+            "deprecated.md",
+            0,
+            "Rust 2018 edition tips",
+            4,
+            CoalaType::Semantic,
+            NoteStatus::Deprecated,
+            Some("active.md"),
+            None,
+            100,
+            Some(&v_dep),
+        )
         .unwrap();
     harness
-        .insert_chunk("c_act", "active.md", 0, "Rust 2024 edition tips", 4, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&v_act))
+        .insert_chunk(
+            "c_act",
+            "active.md",
+            0,
+            "Rust 2024 edition tips",
+            4,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            100,
+            Some(&v_act),
+        )
         .unwrap();
 
     let query = make_basis_vector(0);
-    let res = harness.execute_hybrid_search("edition tips", &query, 100, 5).unwrap();
+    let res = harness
+        .execute_hybrid_search("edition tips", &query, 100, 5)
+        .unwrap();
 
     assert_eq!(res.len(), 1);
     assert_eq!(res[0].chunk_id, "c_act");
@@ -1713,14 +1954,40 @@ fn test_tier3_p2_old_procedural_vs_recent_semantic_decay_inversion() {
     let v_sem = make_synthetic_vector_with_similarity(0.85);
 
     harness
-        .insert_chunk("c_proc", "proc.md", 0, "Standard Operating Procedure", 3, CoalaType::Procedural, NoteStatus::Active, None, None, now - 300 * 86400, Some(&v_proc))
+        .insert_chunk(
+            "c_proc",
+            "proc.md",
+            0,
+            "Standard Operating Procedure",
+            3,
+            CoalaType::Procedural,
+            NoteStatus::Active,
+            None,
+            None,
+            now - 300 * 86400,
+            Some(&v_proc),
+        )
         .unwrap();
     harness
-        .insert_chunk("c_sem", "sem.md", 0, "Meeting Discussion Minutes", 3, CoalaType::Semantic, NoteStatus::Active, None, None, now - 300 * 86400, Some(&v_sem))
+        .insert_chunk(
+            "c_sem",
+            "sem.md",
+            0,
+            "Meeting Discussion Minutes",
+            3,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            now - 300 * 86400,
+            Some(&v_sem),
+        )
         .unwrap();
 
     let query = make_basis_vector(0);
-    let res = harness.execute_hybrid_search("Procedure Minutes", &query, now, 5).unwrap();
+    let res = harness
+        .execute_hybrid_search("Procedure Minutes", &query, now, 5)
+        .unwrap();
 
     assert_eq!(res.len(), 2);
     assert_eq!(
@@ -1732,7 +1999,9 @@ fn test_tier3_p2_old_procedural_vs_recent_semantic_decay_inversion() {
 #[test]
 fn test_tier3_p3_superseded_active_note_retrieval_and_audit() {
     let harness = TestDbHarness::open_in_memory();
-    harness.insert_file_link("arch_v1.md", "arch_v2.md", "supersedes", 100).unwrap();
+    harness
+        .insert_file_link("arch_v1.md", "arch_v2.md", "supersedes", 100)
+        .unwrap();
     let replacement = harness.get_superseding_file("arch_v1.md").unwrap();
     assert_eq!(replacement, Some("arch_v2.md".to_string()));
 }
@@ -1743,7 +2012,19 @@ fn test_tier3_p4_circuit_breaker_vetoes_lexical_hallucination() {
     let v_mismatch = make_synthetic_vector_with_similarity(0.40); // < 0.65
 
     harness
-        .insert_chunk("c_match", "f1.md", 0, "Apple banana cherry fruit salad", 5, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&v_mismatch))
+        .insert_chunk(
+            "c_match",
+            "f1.md",
+            0,
+            "Apple banana cherry fruit salad",
+            5,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            100,
+            Some(&v_mismatch),
+        )
         .unwrap();
 
     let query = make_basis_vector(0);
@@ -1759,17 +2040,42 @@ fn test_tier3_p4_circuit_breaker_vetoes_lexical_hallucination() {
 fn test_tier3_p5_cascade_deletion_followed_by_immediate_hybrid_search() {
     let mut harness = TestDbHarness::open_in_memory();
     let v = make_synthetic_vector_with_similarity(0.90);
-    harness.conn.execute("INSERT INTO files (file_path, file_hash, last_modified) VALUES ('file.md', 'h', 1)", []).unwrap();
-    harness.insert_chunk("c1", "file.md", 0, "Secret content", 2, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&v)).unwrap();
+    harness
+        .conn
+        .execute(
+            "INSERT INTO files (file_path, file_hash, last_modified) VALUES ('file.md', 'h', 1)",
+            [],
+        )
+        .unwrap();
+    harness
+        .insert_chunk(
+            "c1",
+            "file.md",
+            0,
+            "Secret content",
+            2,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            100,
+            Some(&v),
+        )
+        .unwrap();
 
     let query = make_basis_vector(0);
-    let before = harness.execute_hybrid_search("Secret", &query, 100, 5).unwrap();
+    let before = harness
+        .execute_hybrid_search("Secret", &query, 100, 5)
+        .unwrap();
     assert_eq!(before.len(), 1);
 
     harness.delete_file("file.md").unwrap();
 
     let after = harness.execute_hybrid_search("Secret", &query, 100, 5);
-    assert!(after.is_err() || after.unwrap().is_empty(), "Deleted document must vanish from search immediately");
+    assert!(
+        after.is_err() || after.unwrap().is_empty(),
+        "Deleted document must vanish from search immediately"
+    );
 }
 
 #[test]
@@ -1779,19 +2085,60 @@ fn test_tier3_p6_mixed_coala_strata_multi_note_ranking() {
     let v = make_synthetic_vector_with_similarity(0.80);
 
     harness
-        .insert_chunk("c_proc", "p.md", 0, "Topic Guidelines", 2, CoalaType::Procedural, NoteStatus::Active, None, None, now - 200 * 86400, Some(&v))
+        .insert_chunk(
+            "c_proc",
+            "p.md",
+            0,
+            "Topic Guidelines",
+            2,
+            CoalaType::Procedural,
+            NoteStatus::Active,
+            None,
+            None,
+            now - 200 * 86400,
+            Some(&v),
+        )
         .unwrap();
     harness
-        .insert_chunk("c_sem", "s.md", 0, "Topic Guidelines", 2, CoalaType::Semantic, NoteStatus::Active, None, None, now - 200 * 86400, Some(&v))
+        .insert_chunk(
+            "c_sem",
+            "s.md",
+            0,
+            "Topic Guidelines",
+            2,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            now - 200 * 86400,
+            Some(&v),
+        )
         .unwrap();
     harness
-        .insert_chunk("c_epi", "e.md", 0, "Topic Guidelines", 2, CoalaType::Episodic, NoteStatus::Active, None, None, now - 200 * 86400, Some(&v))
+        .insert_chunk(
+            "c_epi",
+            "e.md",
+            0,
+            "Topic Guidelines",
+            2,
+            CoalaType::Episodic,
+            NoteStatus::Active,
+            None,
+            None,
+            now - 200 * 86400,
+            Some(&v),
+        )
         .unwrap();
 
     let query = make_basis_vector(0);
-    let res = harness.execute_hybrid_search("Topic", &query, now, 5).unwrap();
+    let res = harness
+        .execute_hybrid_search("Topic", &query, now, 5)
+        .unwrap();
     assert_eq!(res.len(), 3);
-    assert_eq!(res[0].chunk_id, "c_proc", "Procedural note must be top ranked");
+    assert_eq!(
+        res[0].chunk_id, "c_proc",
+        "Procedural note must be top ranked"
+    );
 }
 
 // ============================================================================
@@ -1805,15 +2152,48 @@ fn test_tier4_s1_engineering_adr_vault_lifecycle() {
     let v_adr2 = make_synthetic_vector_with_similarity(0.88);
 
     harness
-        .insert_chunk("adr_001", "docs/ADR-001.md", 0, "Monolithic database architecture", 3, CoalaType::Semantic, NoteStatus::Deprecated, Some("docs/ADR-002.md"), Some(1720000000), 1700000000, Some(&v_adr1))
+        .insert_chunk(
+            "adr_001",
+            "docs/ADR-001.md",
+            0,
+            "Monolithic database architecture",
+            3,
+            CoalaType::Semantic,
+            NoteStatus::Deprecated,
+            Some("docs/ADR-002.md"),
+            Some(1720000000),
+            1700000000,
+            Some(&v_adr1),
+        )
         .unwrap();
     harness
-        .insert_chunk("adr_002", "docs/ADR-002.md", 0, "Hybrid vector database architecture", 4, CoalaType::Semantic, NoteStatus::Active, None, None, 1720000000, Some(&v_adr2))
+        .insert_chunk(
+            "adr_002",
+            "docs/ADR-002.md",
+            0,
+            "Hybrid vector database architecture",
+            4,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            1720000000,
+            Some(&v_adr2),
+        )
         .unwrap();
-    harness.insert_file_link("docs/ADR-001.md", "docs/ADR-002.md", "supersedes", 1720000000).unwrap();
+    harness
+        .insert_file_link(
+            "docs/ADR-001.md",
+            "docs/ADR-002.md",
+            "supersedes",
+            1720000000,
+        )
+        .unwrap();
 
     let query = make_basis_vector(0);
-    let res = harness.execute_hybrid_search("database architecture", &query, 1720000000, 5).unwrap();
+    let res = harness
+        .execute_hybrid_search("database architecture", &query, 1720000000, 5)
+        .unwrap();
 
     assert_eq!(res.len(), 1);
     assert_eq!(res[0].chunk_id, "adr_002");
@@ -1830,17 +2210,46 @@ fn test_tier4_s2_incident_investigation_decay_vs_runbook_permanence() {
     let v = make_synthetic_vector_with_similarity(0.85);
 
     harness
-        .insert_chunk("runbook_sec", "ops/runbooks/tls.md", 0, "TLS Certificate rotation runbook", 4, CoalaType::Procedural, NoteStatus::Active, None, None, now - 365 * 86400, Some(&v))
+        .insert_chunk(
+            "runbook_sec",
+            "ops/runbooks/tls.md",
+            0,
+            "TLS Certificate rotation runbook",
+            4,
+            CoalaType::Procedural,
+            NoteStatus::Active,
+            None,
+            None,
+            now - 365 * 86400,
+            Some(&v),
+        )
         .unwrap();
     harness
-        .insert_chunk("incident_042", "ops/incidents/inc-42.md", 0, "TLS Certificate rotation incident report", 5, CoalaType::Episodic, NoteStatus::Active, None, None, now - 180 * 86400, Some(&v))
+        .insert_chunk(
+            "incident_042",
+            "ops/incidents/inc-42.md",
+            0,
+            "TLS Certificate rotation incident report",
+            5,
+            CoalaType::Episodic,
+            NoteStatus::Active,
+            None,
+            None,
+            now - 180 * 86400,
+            Some(&v),
+        )
         .unwrap();
 
     let query = make_basis_vector(0);
-    let res = harness.execute_hybrid_search("TLS Certificate", &query, now, 5).unwrap();
+    let res = harness
+        .execute_hybrid_search("TLS Certificate", &query, now, 5)
+        .unwrap();
 
     assert_eq!(res.len(), 2);
-    assert_eq!(res[0].chunk_id, "runbook_sec", "Runbook remains permanently fresh");
+    assert_eq!(
+        res[0].chunk_id, "runbook_sec",
+        "Runbook remains permanently fresh"
+    );
     assert_eq!(res[1].chunk_id, "incident_042");
     assert!(res[0].combined_score > res[1].combined_score);
 }
@@ -1851,12 +2260,25 @@ fn test_tier4_s3_out_of_vault_query_rejection() {
     let v_software = make_basis_vector(0);
 
     harness
-        .insert_chunk("chunk_sw", "src/main.rs", 0, "Rust tokio task spawning", 4, CoalaType::Semantic, NoteStatus::Active, None, None, 100, Some(&v_software))
+        .insert_chunk(
+            "chunk_sw",
+            "src/main.rs",
+            0,
+            "Rust tokio task spawning",
+            4,
+            CoalaType::Semantic,
+            NoteStatus::Active,
+            None,
+            None,
+            100,
+            Some(&v_software),
+        )
         .unwrap();
 
     // Query on biology topic yields vector with low similarity (0.25)
     let v_biology = make_synthetic_vector_with_similarity(0.25);
-    let res = harness.execute_hybrid_search("cellular respiration mitochondria", &v_biology, 100, 5);
+    let res =
+        harness.execute_hybrid_search("cellular respiration mitochondria", &v_biology, 100, 5);
 
     assert_eq!(
         res,
@@ -1876,11 +2298,26 @@ fn test_tier4_s4_continuous_reindexing_and_vacuum_integrity() {
         let path = format!("notes/note_{i}.md");
         harness
             .conn
-            .execute("INSERT INTO files (file_path, file_hash, last_modified) VALUES (?1, 'hash', 1)", rusqlite::params![path])
+            .execute(
+                "INSERT INTO files (file_path, file_hash, last_modified) VALUES (?1, 'hash', 1)",
+                rusqlite::params![path],
+            )
             .unwrap();
         let v = make_basis_vector(i % 384);
         harness
-            .insert_chunk(&format!("chunk_{i}"), &path, 0, "Continuous indexing test content", 5, CoalaType::Semantic, NoteStatus::Active, None, None, 1000, Some(&v))
+            .insert_chunk(
+                &format!("chunk_{i}"),
+                &path,
+                0,
+                "Continuous indexing test content",
+                5,
+                CoalaType::Semantic,
+                NoteStatus::Active,
+                None,
+                None,
+                1000,
+                Some(&v),
+            )
             .unwrap();
     }
     assert_eq!(harness.vectors.len(), 10);
@@ -1888,16 +2325,37 @@ fn test_tier4_s4_continuous_reindexing_and_vacuum_integrity() {
     // Update 5 notes (re-index)
     for i in 1..=5 {
         let path = format!("notes/note_{i}.md");
-        harness.conn.execute("DELETE FROM chunks WHERE file_path = ?1", rusqlite::params![path]).unwrap();
+        harness
+            .conn
+            .execute(
+                "DELETE FROM chunks WHERE file_path = ?1",
+                rusqlite::params![path],
+            )
+            .unwrap();
         let active_ids: Vec<i64> = {
             let mut stmt = harness.conn.prepare("SELECT id FROM chunks").unwrap();
-            stmt.query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap()
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
         };
         harness.vectors.retain(|id, _| active_ids.contains(id));
 
         let v_new = make_basis_vector((i + 50) % 384);
         harness
-            .insert_chunk(&format!("chunk_{i}_v2"), &path, 0, "Updated continuous content", 3, CoalaType::Semantic, NoteStatus::Active, None, None, 2000, Some(&v_new))
+            .insert_chunk(
+                &format!("chunk_{i}_v2"),
+                &path,
+                0,
+                "Updated continuous content",
+                3,
+                CoalaType::Semantic,
+                NoteStatus::Active,
+                None,
+                None,
+                2000,
+                Some(&v_new),
+            )
             .unwrap();
     }
 
@@ -1907,6 +2365,9 @@ fn test_tier4_s4_continuous_reindexing_and_vacuum_integrity() {
     }
 
     assert_eq!(harness.vectors.len(), 7);
-    let chunk_count: i64 = harness.conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0)).unwrap();
+    let chunk_count: i64 = harness
+        .conn
+        .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(chunk_count, 7);
 }

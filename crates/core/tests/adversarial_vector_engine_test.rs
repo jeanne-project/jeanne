@@ -68,7 +68,10 @@ fn test_adv_vec_01_serialization_exactness_and_roundtrip_extremes() {
     neg_zero_vec[0] = -0.0f32;
     neg_zero_vec[187] = -0.0f32;
     let neg_zero_bytes = StorageManager::serialize_vector(&neg_zero_vec);
-    assert_eq!(neg_zero_bytes[3], 0x80, "Sign bit must be preserved in Little-Endian byte 3");
+    assert_eq!(
+        neg_zero_bytes[3], 0x80,
+        "Sign bit must be preserved in Little-Endian byte 3"
+    );
     let neg_zero_deser = StorageManager::deserialize_vector(&neg_zero_bytes);
     assert_eq!(neg_zero_deser[0].to_bits(), (-0.0f32).to_bits());
 
@@ -217,7 +220,9 @@ fn test_adv_vec_03_scale_invariance_and_unnormalized_vectors() {
 
     // Insert normalized vector
     let v_base = make_synthetic_vector(42.0);
-    storage.insert_chunk_vector(r1, &v_base).expect("insert base");
+    storage
+        .insert_chunk_vector(r1, &v_base)
+        .expect("insert base");
 
     // Search with unnormalized scaled vectors: scale=100.0, scale=0.005, scale=5000.0
     for scale in [0.005f32, 0.1, 10.0, 100.0, 5000.0] {
@@ -225,7 +230,9 @@ fn test_adv_vec_03_scale_invariance_and_unnormalized_vectors() {
         for (i, &val) in v_base.iter().enumerate() {
             scaled_query[i] = val * scale;
         }
-        let res = storage.search_vector(&scaled_query, 1).expect("search scaled");
+        let res = storage
+            .search_vector(&scaled_query, 1)
+            .expect("search scaled");
         assert_eq!(res.len(), 1);
         assert!(
             res[0].1.abs() < 1e-4,
@@ -277,7 +284,10 @@ fn test_adv_vec_04_rapid_single_rowid_overwrites() {
         .raw_connection()
         .query_row("SELECT COUNT(*) FROM vec_chunks;", [], |row| row.get(0))
         .expect("count rows");
-    assert_eq!(count, 1, "vec_chunks must never duplicate rows upon overwrite");
+    assert_eq!(
+        count, 1,
+        "vec_chunks must never duplicate rows upon overwrite"
+    );
 }
 
 // ============================================================================
@@ -339,7 +349,9 @@ fn test_adv_vec_05_knn_limit_boundaries() {
     }
 
     // Boundary 4: limit = total_chunks (exact match) -> returns all 15
-    let res_exact = storage.search_vector(&query_vec, total_chunks).expect("limit exact");
+    let res_exact = storage
+        .search_vector(&query_vec, total_chunks)
+        .expect("limit exact");
     assert_eq!(res_exact.len(), total_chunks);
 
     // Boundary 5: limit = 100 (limit > total_chunks) -> returns all 15 without padding
@@ -441,7 +453,9 @@ fn test_adv_vec_07_extreme_64bit_integer_rowids() {
 
     for (i, &rid) in extreme_rowids.iter().enumerate() {
         let v = make_synthetic_vector(i as f32 + 1.0);
-        storage.insert_chunk_vector(rid, &v).expect("insert extreme rowid");
+        storage
+            .insert_chunk_vector(rid, &v)
+            .expect("insert extreme rowid");
 
         let res = storage.search_vector(&v, 1).expect("search extreme rowid");
         assert_eq!(res.len(), 1);
@@ -485,7 +499,10 @@ fn test_adv_vec_08_ondisk_inmemory_parity() {
 
     assert_eq!(disk_res.len(), mem_res.len());
     for i in 0..disk_res.len() {
-        assert_eq!(disk_res[i].0, mem_res[i].0, "Rowids must match between disk and mem");
+        assert_eq!(
+            disk_res[i].0, mem_res[i].0,
+            "Rowids must match between disk and mem"
+        );
         assert!(
             (disk_res[i].1 - mem_res[i].1).abs() < 1e-5,
             "Distances must match between disk ({}) and mem ({})",

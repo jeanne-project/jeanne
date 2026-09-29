@@ -54,7 +54,9 @@ fn test_rag_engine_circuit_breaker_unit() {
 #[test]
 fn test_rag_error_conversions_and_partial_eq() {
     let err1 = RagError::InformationNotFound { similarity: 0.62 };
-    let err2 = RagError::InformationNotFound { similarity: 0.6200001 };
+    let err2 = RagError::InformationNotFound {
+        similarity: 0.6200001,
+    };
     assert_eq!(err1, err2);
 
     let j_err = JeanneError::Vault("something failed".to_string());
@@ -112,7 +114,9 @@ fn test_rag_engine_identical_vector_search() {
     let rowid = storage.index_chunk(&chunk).expect("index chunk");
 
     let v0 = make_basis_vector(0);
-    storage.insert_chunk_vector(rowid, &v0).expect("insert vector");
+    storage
+        .insert_chunk_vector(rowid, &v0)
+        .expect("insert vector");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -148,7 +152,9 @@ fn test_rag_engine_circuit_breaker_vetoes_irrelevant_query() {
 
     // Stored vector along basis 0
     let v0 = make_basis_vector(0);
-    storage.insert_chunk_vector(rowid, &v0).expect("insert vector");
+    storage
+        .insert_chunk_vector(rowid, &v0)
+        .expect("insert vector");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -185,7 +191,9 @@ fn test_rag_engine_obsolescence_filtering_omits_deprecated() {
     );
     let r_old = storage.index_chunk(&chunk_old).expect("index");
     let v_old = make_basis_vector(0);
-    storage.insert_chunk_vector(r_old, &v_old).expect("insert vec");
+    storage
+        .insert_chunk_vector(r_old, &v_old)
+        .expect("insert vec");
 
     let chunk_new = IndexedChunk::new(
         "c_new",
@@ -199,7 +207,9 @@ fn test_rag_engine_obsolescence_filtering_omits_deprecated() {
     );
     let r_new = storage.index_chunk(&chunk_new).expect("index");
     let v_new = make_synthetic_vector(0.85);
-    storage.insert_chunk_vector(r_new, &v_new).expect("insert vec");
+    storage
+        .insert_chunk_vector(r_new, &v_new)
+        .expect("insert vec");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 

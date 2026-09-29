@@ -36,7 +36,11 @@ fn make_synthetic_vector(seed: f32) -> [f32; 384] {
 fn test_m1_01_vector_serialization_and_deserialization_roundtrip() {
     let original = make_synthetic_vector(42.0);
     let bytes = StorageManager::serialize_vector(&original);
-    assert_eq!(bytes.len(), 1536, "Serialized buffer must be exactly 1,536 bytes");
+    assert_eq!(
+        bytes.len(),
+        1536,
+        "Serialized buffer must be exactly 1,536 bytes"
+    );
 
     let deserialized = StorageManager::deserialize_vector(&bytes);
     for (i, (&orig, &deser)) in original.iter().zip(deserialized.iter()).enumerate() {

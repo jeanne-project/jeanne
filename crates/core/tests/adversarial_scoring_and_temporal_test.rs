@@ -10,7 +10,7 @@
 
 use jeanne_core::error::RagError;
 use jeanne_core::models::{CoalaType, IndexedChunk, NoteStatus};
-use jeanne_core::rag::{check_circuit_breaker, compute_hybrid_decay_score, RagEngine};
+use jeanne_core::rag::{RagEngine, check_circuit_breaker, compute_hybrid_decay_score};
 use jeanne_core::storage::StorageManager;
 use std::sync::{Arc, Mutex};
 
@@ -46,7 +46,11 @@ fn test_adv_score_01_extreme_timestamps_delta_t_zero() {
     let b_score = 0.60;
     let expected_raw = 0.7 * v_score + 0.3 * b_score;
 
-    for coala_type in [CoalaType::Procedural, CoalaType::Semantic, CoalaType::Episodic] {
+    for coala_type in [
+        CoalaType::Procedural,
+        CoalaType::Semantic,
+        CoalaType::Episodic,
+    ] {
         let score = compute_hybrid_decay_score(v_score, b_score, coala_type, 0.0);
         assert!(
             (score - expected_raw).abs() < 1e-9,
@@ -64,7 +68,8 @@ fn test_adv_score_02_extreme_timestamps_10_years_decay() {
     let raw = 0.7 * v_score + 0.3 * b_score; // 0.63 + 0.15 = 0.78
 
     // Procedural: lambda = 0.0 => denominator = 1.0 => 100% score retention
-    let proc_score = compute_hybrid_decay_score(v_score, b_score, CoalaType::Procedural, age_10_years_days);
+    let proc_score =
+        compute_hybrid_decay_score(v_score, b_score, CoalaType::Procedural, age_10_years_days);
     assert!(
         (proc_score - raw).abs() < 1e-9,
         "Procedural note must retain 100% of score after 10 years"
@@ -72,8 +77,10 @@ fn test_adv_score_02_extreme_timestamps_10_years_decay() {
 
     // Semantic & Episodic: lambda = 0.005 => denominator = 1 + 0.005 * 3650 = 1 + 18.25 = 19.25
     let expected_attenuation = 1.0 / 19.25;
-    let sem_score = compute_hybrid_decay_score(v_score, b_score, CoalaType::Semantic, age_10_years_days);
-    let epi_score = compute_hybrid_decay_score(v_score, b_score, CoalaType::Episodic, age_10_years_days);
+    let sem_score =
+        compute_hybrid_decay_score(v_score, b_score, CoalaType::Semantic, age_10_years_days);
+    let epi_score =
+        compute_hybrid_decay_score(v_score, b_score, CoalaType::Episodic, age_10_years_days);
 
     assert!(
         (sem_score - (raw * expected_attenuation)).abs() < 1e-9,
@@ -96,14 +103,16 @@ fn test_adv_score_03_extreme_timestamps_50_years_procedural_immunity() {
     let b_score = 0.40;
     let raw = 0.7 * v_score + 0.3 * b_score;
 
-    let proc_score = compute_hybrid_decay_score(v_score, b_score, CoalaType::Procedural, age_50_years_days);
+    let proc_score =
+        compute_hybrid_decay_score(v_score, b_score, CoalaType::Procedural, age_50_years_days);
     assert!(
         (proc_score - raw).abs() < 1e-9,
         "Procedural note must retain 100% score even after 50 years"
     );
 
     // Semantic denominator: 1 + 0.005 * 18250 = 1 + 91.25 = 92.25
-    let sem_score = compute_hybrid_decay_score(v_score, b_score, CoalaType::Semantic, age_50_years_days);
+    let sem_score =
+        compute_hybrid_decay_score(v_score, b_score, CoalaType::Semantic, age_50_years_days);
     assert!((sem_score - (raw / 92.25)).abs() < 1e-9);
     assert!(
         (proc_score / sem_score - 92.25).abs() < 1e-5,
@@ -118,7 +127,11 @@ fn test_adv_score_04_negative_delta_t_future_clamping() {
     let raw = 0.7 * v_score + 0.3 * b_score;
 
     for negative_age in [-1.0, -100.0, -10000.0] {
-        for coala_type in [CoalaType::Procedural, CoalaType::Semantic, CoalaType::Episodic] {
+        for coala_type in [
+            CoalaType::Procedural,
+            CoalaType::Semantic,
+            CoalaType::Episodic,
+        ] {
             let score = compute_hybrid_decay_score(v_score, b_score, coala_type, negative_age);
             assert!(
                 (score - raw).abs() < 1e-9,
@@ -217,7 +230,9 @@ fn test_adv_score_07_circuit_breaker_veto_on_pure_lexical_in_rag_engine() {
 
     // Vector is stored along basis 0
     let v0 = make_basis_vector(0);
-    storage.insert_chunk_vector(rowid, &v0).expect("insert vector");
+    storage
+        .insert_chunk_vector(rowid, &v0)
+        .expect("insert vector");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -287,7 +302,9 @@ fn test_adv_score_08_ranking_inversion_old_procedural_vs_recent_semantic() {
     );
     let r_proc = storage.index_chunk(&c_proc).expect("index");
     let v_proc = make_synthetic_vector(0.75);
-    storage.insert_chunk_vector(r_proc, &v_proc).expect("insert vec");
+    storage
+        .insert_chunk_vector(r_proc, &v_proc)
+        .expect("insert vec");
 
     // 2. Note B: 100-day-old Semantic Note
     // Higher vector similarity 0.85, no lexical keyword
@@ -307,7 +324,9 @@ fn test_adv_score_08_ranking_inversion_old_procedural_vs_recent_semantic() {
     );
     let r_sem = storage.index_chunk(&c_sem).expect("index");
     let v_sem = make_synthetic_vector(0.85);
-    storage.insert_chunk_vector(r_sem, &v_sem).expect("insert vec");
+    storage
+        .insert_chunk_vector(r_sem, &v_sem)
+        .expect("insert vec");
 
     // 3. Note C: Fresh Semantic Note (0 days old)
     // Moderate vector similarity 0.78
@@ -326,7 +345,9 @@ fn test_adv_score_08_ranking_inversion_old_procedural_vs_recent_semantic() {
     );
     let r_fresh = storage.index_chunk(&c_fresh).expect("index");
     let v_fresh = make_synthetic_vector(0.78);
-    storage.insert_chunk_vector(r_fresh, &v_fresh).expect("insert vec");
+    storage
+        .insert_chunk_vector(r_fresh, &v_fresh)
+        .expect("insert vec");
 
     let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
 
@@ -354,8 +375,14 @@ fn test_adv_score_08_ranking_inversion_old_procedural_vs_recent_semantic() {
     // Verify ranking order:
     // Note C (Fresh) ranks higher than Note A (Procedural)
     // Note A (10-year Procedural) ranks HIGHER than Note B (100-day Semantic) despite Note B having higher vector similarity!
-    let pos_proc = results.iter().position(|r| r.chunk_id == "chunk_sop").unwrap();
-    let pos_sem_100d = results.iter().position(|r| r.chunk_id == "chunk_sem_100d").unwrap();
+    let pos_proc = results
+        .iter()
+        .position(|r| r.chunk_id == "chunk_sop")
+        .unwrap();
+    let pos_sem_100d = results
+        .iter()
+        .position(|r| r.chunk_id == "chunk_sem_100d")
+        .unwrap();
 
     assert!(
         pos_proc < pos_sem_100d,
@@ -416,7 +443,9 @@ fn test_adv_score_10_extreme_float_and_nan_resilience() {
     let cb_neginf = check_circuit_breaker(f32::NEG_INFINITY);
     assert_eq!(
         cb_neginf,
-        Err(RagError::InformationNotFound { similarity: f32::NEG_INFINITY }),
+        Err(RagError::InformationNotFound {
+            similarity: f32::NEG_INFINITY
+        }),
         "Circuit breaker with -inf must fail"
     );
 

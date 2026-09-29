@@ -48,7 +48,9 @@ fn test_adv_01_cascade_multi_chunk_deletion_and_zero_orphan_rows() {
             chunk_id: format!("knowledge_chunk_{i}"),
             file_path: file_path.to_string(),
             chunk_index: i,
-            content: format!("Adversarial test content section {i} regarding quantum computing paradigms"),
+            content: format!(
+                "Adversarial test content section {i} regarding quantum computing paradigms"
+            ),
             token_count: 10,
             coala_type: CoalaType::Semantic,
             status: NoteStatus::Active,
@@ -60,15 +62,27 @@ fn test_adv_01_cascade_multi_chunk_deletion_and_zero_orphan_rows() {
         rowids.push(rowid);
 
         let vec = make_synthetic_vector(i as f32 * 10.0);
-        storage.insert_chunk_vector(rowid, &vec).expect("insert vector");
+        storage
+            .insert_chunk_vector(rowid, &vec)
+            .expect("insert vector");
     }
 
     // Add multiple file links
     storage
-        .insert_file_link(file_path, "Notes/Target1.md", FileLink::TYPE_WIKILINK, 1715000000)
+        .insert_file_link(
+            file_path,
+            "Notes/Target1.md",
+            FileLink::TYPE_WIKILINK,
+            1715000000,
+        )
         .expect("link 1");
     storage
-        .insert_file_link(file_path, "Notes/Target2.md", FileLink::TYPE_SUPERSEDES, 1715000000)
+        .insert_file_link(
+            file_path,
+            "Notes/Target2.md",
+            FileLink::TYPE_SUPERSEDES,
+            1715000000,
+        )
         .expect("link 2");
     storage
         .insert_file_link(file_path, "Notes/Target3.md", "relates", 1715000000)
@@ -78,19 +92,33 @@ fn test_adv_01_cascade_multi_chunk_deletion_and_zero_orphan_rows() {
     let conn = storage.raw_connection();
 
     let chunks_cnt: i64 = conn
-        .query_row("SELECT COUNT(*) FROM chunks WHERE file_path = ?1", [file_path], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM chunks WHERE file_path = ?1",
+            [file_path],
+            |r| r.get(0),
+        )
         .expect("count chunks");
-    assert_eq!(chunks_cnt, num_chunks as i64, "All chunks must exist before deletion");
+    assert_eq!(
+        chunks_cnt, num_chunks as i64,
+        "All chunks must exist before deletion"
+    );
 
     let links_cnt: i64 = conn
-        .query_row("SELECT COUNT(*) FROM file_links WHERE source_path = ?1", [file_path], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM file_links WHERE source_path = ?1",
+            [file_path],
+            |r| r.get(0),
+        )
         .expect("count links");
     assert_eq!(links_cnt, 3, "All links must exist before deletion");
 
     let vecs_cnt: i64 = conn
         .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
         .expect("count vec_chunks");
-    assert_eq!(vecs_cnt, num_chunks as i64, "All vectors must exist before deletion");
+    assert_eq!(
+        vecs_cnt, num_chunks as i64,
+        "All vectors must exist before deletion"
+    );
 
     let fts_cnt: i64 = conn
         .query_row(
@@ -99,30 +127,51 @@ fn test_adv_01_cascade_multi_chunk_deletion_and_zero_orphan_rows() {
             |r| r.get(0),
         )
         .expect("count fts_notes");
-    assert_eq!(fts_cnt, num_chunks as i64, "All fts_notes must exist before deletion");
+    assert_eq!(
+        fts_cnt, num_chunks as i64,
+        "All fts_notes must exist before deletion"
+    );
 
     // FTS search should return matches
     let search_pre = storage.search_fts("quantum", 10).expect("search pre");
-    assert!(!search_pre.is_empty(), "FTS must find quantum before deletion");
+    assert!(
+        !search_pre.is_empty(),
+        "FTS must find quantum before deletion"
+    );
 
     // ACT: Delete the file
     storage.delete_file(file_path).expect("delete_file");
 
     // ASSERT: Zero orphan rows in ALL tables
     let post_files: i64 = conn
-        .query_row("SELECT COUNT(*) FROM files WHERE file_path = ?1", [file_path], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM files WHERE file_path = ?1",
+            [file_path],
+            |r| r.get(0),
+        )
         .expect("count files post");
     assert_eq!(post_files, 0, "File row must be deleted");
 
     let post_chunks: i64 = conn
-        .query_row("SELECT COUNT(*) FROM chunks WHERE file_path = ?1", [file_path], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM chunks WHERE file_path = ?1",
+            [file_path],
+            |r| r.get(0),
+        )
         .expect("count chunks post");
     assert_eq!(post_chunks, 0, "No chunks may remain for deleted file");
 
     let post_links: i64 = conn
-        .query_row("SELECT COUNT(*) FROM file_links WHERE source_path = ?1", [file_path], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM file_links WHERE source_path = ?1",
+            [file_path],
+            |r| r.get(0),
+        )
         .expect("count links post");
-    assert_eq!(post_links, 0, "No file_links may remain with source_path of deleted file");
+    assert_eq!(
+        post_links, 0,
+        "No file_links may remain with source_path of deleted file"
+    );
 
     let post_vecs: i64 = conn
         .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
@@ -136,10 +185,16 @@ fn test_adv_01_cascade_multi_chunk_deletion_and_zero_orphan_rows() {
             |r| r.get(0),
         )
         .expect("count fts post");
-    assert_eq!(post_fts, 0, "CRITICAL: No orphan entries may remain in fts_notes after file deletion!");
+    assert_eq!(
+        post_fts, 0,
+        "CRITICAL: No orphan entries may remain in fts_notes after file deletion!"
+    );
 
     let search_post = storage.search_fts("quantum", 10).expect("search post");
-    assert!(search_post.is_empty(), "FTS search must return empty post deletion");
+    assert!(
+        search_post.is_empty(),
+        "FTS search must return empty post deletion"
+    );
 }
 
 #[test]
@@ -169,8 +224,14 @@ fn test_adv_02_circular_and_self_referencing_supersedes_links() {
         .insert_file_link("NoteSelf.md", "NoteSelf.md", FileLink::TYPE_SUPERSEDES, 300)
         .expect("link self");
 
-    let self_successor = storage.get_superseding_file("NoteSelf.md").expect("get self");
-    assert_eq!(self_successor, Some("NoteSelf.md".to_string()), "Self-reference terminates cleanly");
+    let self_successor = storage
+        .get_superseding_file("NoteSelf.md")
+        .expect("get self");
+    assert_eq!(
+        self_successor,
+        Some("NoteSelf.md".to_string()),
+        "Self-reference terminates cleanly"
+    );
 
     // 3. Three-node cycle: X -> Y -> Z -> X
     storage
@@ -184,11 +245,20 @@ fn test_adv_02_circular_and_self_referencing_supersedes_links() {
         .expect("link Z supersedes X");
 
     // Y's successor is X (X supersedes Y)
-    assert_eq!(storage.get_superseding_file("NodeY.md").expect("Y"), Some("NodeX.md".to_string()));
+    assert_eq!(
+        storage.get_superseding_file("NodeY.md").expect("Y"),
+        Some("NodeX.md".to_string())
+    );
     // Z's successor is Y (Y supersedes Z)
-    assert_eq!(storage.get_superseding_file("NodeZ.md").expect("Z"), Some("NodeY.md".to_string()));
+    assert_eq!(
+        storage.get_superseding_file("NodeZ.md").expect("Z"),
+        Some("NodeY.md".to_string())
+    );
     // X's successor is Z (Z supersedes X)
-    assert_eq!(storage.get_superseding_file("NodeX.md").expect("X"), Some("NodeZ.md".to_string()));
+    assert_eq!(
+        storage.get_superseding_file("NodeX.md").expect("X"),
+        Some("NodeZ.md".to_string())
+    );
 }
 
 #[test]
@@ -201,11 +271,18 @@ fn test_adv_03_non_existent_target_links_and_non_existent_file_deletion() {
     let real_source = "Notes/ExistingNote.md";
 
     storage
-        .insert_file_link(real_source, ghost_target, FileLink::TYPE_SUPERSEDES, 1716000000)
+        .insert_file_link(
+            real_source,
+            ghost_target,
+            FileLink::TYPE_SUPERSEDES,
+            1716000000,
+        )
         .expect("insert link to non-existent target");
 
     // Query 1-hop for ghost target
-    let resolved = storage.get_superseding_file(ghost_target).expect("query ghost");
+    let resolved = storage
+        .get_superseding_file(ghost_target)
+        .expect("query ghost");
     assert_eq!(
         resolved,
         Some(real_source.to_string()),
@@ -213,17 +290,30 @@ fn test_adv_03_non_existent_target_links_and_non_existent_file_deletion() {
     );
 
     // Query 1-hop for a completely unknown file
-    let unknown = storage.get_superseding_file("CompletelyRandom.md").expect("query unknown");
-    assert_eq!(unknown, None, "Unknown note should have no superseding file");
+    let unknown = storage
+        .get_superseding_file("CompletelyRandom.md")
+        .expect("query unknown");
+    assert_eq!(
+        unknown, None,
+        "Unknown note should have no superseding file"
+    );
 
     // 2. Delete non-existent file path: must be a safe, idempotent no-op
     let delete_noop = storage.delete_file("NonExistent/File/Path.md");
-    assert!(delete_noop.is_ok(), "Deleting a non-existent file must not error");
+    assert!(
+        delete_noop.is_ok(),
+        "Deleting a non-existent file must not error"
+    );
 
     // Ensure database remained intact
     let conn = storage.raw_connection();
-    let file_count: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0)).unwrap();
-    assert_eq!(file_count, 1, "Real source file created during link insertion must still exist");
+    let file_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        file_count, 1,
+        "Real source file created during link insertion must still exist"
+    );
 }
 
 #[test]
@@ -236,7 +326,12 @@ fn test_adv_04_churn_and_reindexing_stress() {
     // 10 cycles of inserting 10 chunks, querying vectors, deleting, and re-inserting
     for cycle in 0..10 {
         storage
-            .upsert_file(file_path, &format!("hash_{cycle}"), 1710000000 + cycle, None)
+            .upsert_file(
+                file_path,
+                &format!("hash_{cycle}"),
+                1710000000 + cycle,
+                None,
+            )
             .expect("upsert file");
 
         let mut rowids = Vec::new();
@@ -258,31 +353,44 @@ fn test_adv_04_churn_and_reindexing_stress() {
             rowids.push(rowid);
 
             let v = make_synthetic_vector((cycle * 10 + i as i64) as f32);
-            storage.insert_chunk_vector(rowid, &v).expect("insert vector");
+            storage
+                .insert_chunk_vector(rowid, &v)
+                .expect("insert vector");
         }
 
         // Verify counts
         let conn = storage.raw_connection();
-        let chunks_cnt: i64 = conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0)).unwrap();
+        let chunks_cnt: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(chunks_cnt, 10);
-        let vecs_cnt: i64 = conn.query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0)).unwrap();
+        let vecs_cnt: i64 = conn
+            .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(vecs_cnt, 10);
-        let fts_cnt: i64 = conn.query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0)).unwrap();
+        let fts_cnt: i64 = conn
+            .query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(fts_cnt, 10);
 
         // Delete file
         storage.delete_file(file_path).expect("delete file");
 
         // Verify zero leftovers
-        let chunks_post: i64 = conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0)).unwrap();
+        let chunks_post: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(chunks_post, 0, "Cycle {cycle}: chunks must be 0");
-        let vecs_post: i64 = conn.query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0)).unwrap();
+        let vecs_post: i64 = conn
+            .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(vecs_post, 0, "Cycle {cycle}: vec_chunks must be 0");
-        let fts_post: i64 = conn.query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0)).unwrap();
+        let fts_post: i64 = conn
+            .query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(fts_post, 0, "Cycle {cycle}: fts_notes must be 0");
     }
 }
-
 
 #[test]
 fn test_adv_05_multi_file_isolation_cascade_deletion() {
@@ -295,9 +403,15 @@ fn test_adv_05_multi_file_isolation_cascade_deletion() {
     let file_b = "Notes/FileB.md";
     let file_c = "Notes/FileC.md";
 
-    storage.upsert_file(file_a, "hash_a", 1700000000, None).unwrap();
-    storage.upsert_file(file_b, "hash_b", 1700000000, None).unwrap();
-    storage.upsert_file(file_c, "hash_c", 1700000000, None).unwrap();
+    storage
+        .upsert_file(file_a, "hash_a", 1700000000, None)
+        .unwrap();
+    storage
+        .upsert_file(file_b, "hash_b", 1700000000, None)
+        .unwrap();
+    storage
+        .upsert_file(file_c, "hash_c", 1700000000, None)
+        .unwrap();
 
     let populate_file = |storage: &StorageManager, path: &str, count: usize, tag: &str| {
         for i in 0..count {
@@ -324,56 +438,105 @@ fn test_adv_05_multi_file_isolation_cascade_deletion() {
     populate_file(&storage, file_b, 30, "beta");
     populate_file(&storage, file_c, 20, "gamma");
 
-    storage.insert_file_link(file_a, file_b, "relates", 100).unwrap();
-    storage.insert_file_link(file_b, file_c, "supersedes", 200).unwrap();
-    storage.insert_file_link(file_c, file_a, "wikilink", 300).unwrap();
+    storage
+        .insert_file_link(file_a, file_b, "relates", 100)
+        .unwrap();
+    storage
+        .insert_file_link(file_b, file_c, "supersedes", 200)
+        .unwrap();
+    storage
+        .insert_file_link(file_c, file_a, "wikilink", 300)
+        .unwrap();
 
     let conn = storage.raw_connection();
 
     // Verify initial global counts: 90 chunks, 90 vectors, 90 fts, 3 links, 3 files
-    let total_chunks: i64 = conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0)).unwrap();
+    let total_chunks: i64 = conn
+        .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(total_chunks, 90);
-    let total_vecs: i64 = conn.query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0)).unwrap();
+    let total_vecs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(total_vecs, 90);
-    let total_fts: i64 = conn.query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0)).unwrap();
+    let total_fts: i64 = conn
+        .query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(total_fts, 90);
-    let total_links: i64 = conn.query_row("SELECT COUNT(*) FROM file_links", [], |r| r.get(0)).unwrap();
+    let total_links: i64 = conn
+        .query_row("SELECT COUNT(*) FROM file_links", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(total_links, 3);
 
     // ACT: Delete ONLY file B (30 chunks)
     storage.delete_file(file_b).expect("delete file B");
 
     // ASSERT: Total counts should drop by exactly 30 chunks, 30 vecs, 30 fts, 1 link (where B was source)
-    let post_chunks: i64 = conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0)).unwrap();
+    let post_chunks: i64 = conn
+        .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(post_chunks, 60, "Must be exactly 40 (A) + 20 (C)");
 
-    let post_vecs: i64 = conn.query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0)).unwrap();
+    let post_vecs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(post_vecs, 60, "vec_chunks must have 60 rows left");
 
-    let post_fts: i64 = conn.query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0)).unwrap();
+    let post_fts: i64 = conn
+        .query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(post_fts, 60, "fts_notes must have 60 rows left");
 
     // File B chunks specifically:
-    let b_chunks: i64 = conn.query_row("SELECT COUNT(*) FROM chunks WHERE file_path = ?1", [file_b], |r| r.get(0)).unwrap();
+    let b_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunks WHERE file_path = ?1",
+            [file_b],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(b_chunks, 0);
 
     // File A chunks specifically:
-    let a_chunks: i64 = conn.query_row("SELECT COUNT(*) FROM chunks WHERE file_path = ?1", [file_a], |r| r.get(0)).unwrap();
+    let a_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunks WHERE file_path = ?1",
+            [file_a],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(a_chunks, 40);
 
     // File C chunks specifically:
-    let c_chunks: i64 = conn.query_row("SELECT COUNT(*) FROM chunks WHERE file_path = ?1", [file_c], |r| r.get(0)).unwrap();
+    let c_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunks WHERE file_path = ?1",
+            [file_c],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(c_chunks, 20);
 
     // FTS isolation:
     let beta_res = storage.search_fts("beta", 10).unwrap();
-    assert!(beta_res.is_empty(), "Deleted file's content must not appear in FTS");
+    assert!(
+        beta_res.is_empty(),
+        "Deleted file's content must not appear in FTS"
+    );
 
     let alpha_res = storage.search_fts("alpha", 10).unwrap();
-    assert_eq!(alpha_res.len(), 10, "Alpha file's content must remain searchable");
+    assert_eq!(
+        alpha_res.len(),
+        10,
+        "Alpha file's content must remain searchable"
+    );
 
     let gamma_res = storage.search_fts("gamma", 10).unwrap();
-    assert_eq!(gamma_res.len(), 10, "Gamma file's content must remain searchable");
+    assert_eq!(
+        gamma_res.len(),
+        10,
+        "Gamma file's content must remain searchable"
+    );
 }
 
 #[test]
@@ -388,7 +551,9 @@ fn test_adv_06_dangling_target_link_retention_and_deletion() {
     storage.upsert_file(tgt, "h1", 1600000000, None).unwrap();
 
     // Arch_v2 supersedes Arch_v1
-    storage.insert_file_link(src, tgt, FileLink::TYPE_SUPERSEDES, 1700000000).unwrap();
+    storage
+        .insert_file_link(src, tgt, FileLink::TYPE_SUPERSEDES, 1700000000)
+        .unwrap();
 
     // 1. Delete target file Arch_v1 (the obsolete file physically deleted)
     storage.delete_file(tgt).expect("delete target file");
@@ -406,11 +571,19 @@ fn test_adv_06_dangling_target_link_retention_and_deletion() {
 
     // The link should now be cascade-purged because source_path was deleted
     let conn = storage.raw_connection();
-    let link_count: i64 = conn.query_row("SELECT COUNT(*) FROM file_links", [], |r| r.get(0)).unwrap();
-    assert_eq!(link_count, 0, "Link must be cascade deleted when source is deleted");
+    let link_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM file_links", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        link_count, 0,
+        "Link must be cascade deleted when source is deleted"
+    );
 
     let successor_after = storage.get_superseding_file(tgt).unwrap();
-    assert_eq!(successor_after, None, "No successor after both files deleted");
+    assert_eq!(
+        successor_after, None,
+        "No successor after both files deleted"
+    );
 }
 
 #[test]
@@ -419,7 +592,9 @@ fn test_adv_07_chunks_without_vectors_and_unindexed_vectors() {
     storage.init_schema().expect("init schema");
 
     let file_path = "Notes/Partial.md";
-    storage.upsert_file(file_path, "h_part", 1700000000, None).unwrap();
+    storage
+        .upsert_file(file_path, "h_part", 1700000000, None)
+        .unwrap();
 
     // Insert 5 chunks: 3 with vectors, 2 without vectors
     let mut rowids = Vec::new();
@@ -449,18 +624,27 @@ fn test_adv_07_chunks_without_vectors_and_unindexed_vectors() {
     // Insert an orphan vector directly into vec_chunks with rowid not matching any chunk
     let orphan_rowid = 888888i64;
     let orphan_vec = make_synthetic_vector(99.0);
-    storage.insert_chunk_vector(orphan_rowid, &orphan_vec).unwrap();
+    storage
+        .insert_chunk_vector(orphan_rowid, &orphan_vec)
+        .unwrap();
 
     let conn = storage.raw_connection();
-    let initial_vecs: i64 = conn.query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0)).unwrap();
+    let initial_vecs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(initial_vecs, 4, "3 chunk vectors + 1 orphan vector");
 
     // ACT: delete_file purges file chunks and runs defensive vector orphan cleanup
     storage.delete_file(file_path).expect("delete_file");
 
     // ASSERT: All 4 vectors in vec_chunks must be deleted (3 because chunks were deleted, 1 because rowid 888888 is an orphan)
-    let post_vecs: i64 = conn.query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0)).unwrap();
-    assert_eq!(post_vecs, 0, "All vectors including orphan rowid must be purged");
+    let post_vecs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        post_vecs, 0,
+        "All vectors including orphan rowid must be purged"
+    );
 }
 
 #[test]
@@ -472,9 +656,15 @@ fn test_adv_08_complex_graph_1hop_obsolescence_prioritization() {
     let candidate_v2 = "Notes/Spec_v2.md";
     let candidate_v3 = "Notes/Spec_v3.md";
 
-    storage.upsert_file(old_doc, "h0", 1600000000, None).unwrap();
-    storage.upsert_file(candidate_v2, "h2", 1650000000, None).unwrap();
-    storage.upsert_file(candidate_v3, "h3", 1700000000, None).unwrap();
+    storage
+        .upsert_file(old_doc, "h0", 1600000000, None)
+        .unwrap();
+    storage
+        .upsert_file(candidate_v2, "h2", 1650000000, None)
+        .unwrap();
+    storage
+        .upsert_file(candidate_v3, "h3", 1700000000, None)
+        .unwrap();
 
     // Two different documents claim to supersede Legacy_Spec.md:
     // v2 at timestamp 1650000000
@@ -494,7 +684,6 @@ fn test_adv_08_complex_graph_1hop_obsolescence_prioritization() {
     );
 }
 
-
 #[test]
 fn test_adv_09_special_characters_sql_injection_resilience() {
     let storage = StorageManager::open_in_memory().expect("open memory");
@@ -504,8 +693,12 @@ fn test_adv_09_special_characters_sql_injection_resilience() {
     let tricky_file = "Notes/It's a tricky file -- DROP TABLE chunks; -- \"[2026]\" 🦀.md";
     let tricky_target = "Notes/O'Connor's & Co. \"Special\" -- DELETE FROM files.md";
 
-    storage.upsert_file(tricky_file, "hash_tricky", 1720000000, None).unwrap();
-    storage.upsert_file(tricky_target, "hash_target", 1720000000, None).unwrap();
+    storage
+        .upsert_file(tricky_file, "hash_tricky", 1720000000, None)
+        .unwrap();
+    storage
+        .upsert_file(tricky_target, "hash_target", 1720000000, None)
+        .unwrap();
 
     let chunk = IndexedChunk {
         id: None,
@@ -526,7 +719,12 @@ fn test_adv_09_special_characters_sql_injection_resilience() {
 
     // Link insertion with tricky names
     storage
-        .insert_file_link(tricky_file, tricky_target, FileLink::TYPE_SUPERSEDES, 1720000000)
+        .insert_file_link(
+            tricky_file,
+            tricky_target,
+            FileLink::TYPE_SUPERSEDES,
+            1720000000,
+        )
         .unwrap();
 
     // 1-Hop traversal on tricky name
@@ -534,7 +732,9 @@ fn test_adv_09_special_characters_sql_injection_resilience() {
     assert_eq!(successor, Some(tricky_file.to_string()));
 
     // Cascade deletion of tricky file
-    storage.delete_file(tricky_file).expect("delete tricky file");
+    storage
+        .delete_file(tricky_file)
+        .expect("delete tricky file");
 
     let conn = storage.raw_connection();
     let remaining_chunks: i64 = conn
@@ -546,7 +746,9 @@ fn test_adv_09_special_characters_sql_injection_resilience() {
         .unwrap();
     assert_eq!(remaining_chunks, 0);
 
-    let remaining_vecs: i64 = conn.query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0)).unwrap();
+    let remaining_vecs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(remaining_vecs, 0);
 
     // Verify foreign key integrity using SQLite's foreign_key_check pragma
@@ -560,7 +762,11 @@ fn test_adv_09_special_characters_sql_injection_resilience() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert!(fk_violations.is_empty(), "Zero foreign key violations must exist: {:?}", fk_violations);
+    assert!(
+        fk_violations.is_empty(),
+        "Zero foreign key violations must exist: {:?}",
+        fk_violations
+    );
 }
 
 #[test]
@@ -572,7 +778,9 @@ fn test_adv_10_large_scale_cascade_and_foreign_key_check() {
 
     let conn = storage.raw_connection();
     let file_path = "Notes/MassiveDocument.md";
-    storage.upsert_file(file_path, "hash_massive", 1720000000, None).unwrap();
+    storage
+        .upsert_file(file_path, "hash_massive", 1720000000, None)
+        .unwrap();
 
     // 200 chunks in single file
     let chunk_count = 200;
@@ -596,22 +804,34 @@ fn test_adv_10_large_scale_cascade_and_foreign_key_check() {
     }
 
     // Verify exactly 200 rows in chunks, vec_chunks, fts_notes
-    let c_cnt: i64 = conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0)).unwrap();
+    let c_cnt: i64 = conn
+        .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(c_cnt, chunk_count as i64);
-    let v_cnt: i64 = conn.query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0)).unwrap();
+    let v_cnt: i64 = conn
+        .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(v_cnt, chunk_count as i64);
-    let f_cnt: i64 = conn.query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0)).unwrap();
+    let f_cnt: i64 = conn
+        .query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(f_cnt, chunk_count as i64);
 
     // ACT: Cascade delete massive file
     storage.delete_file(file_path).unwrap();
 
     // Verify all 200 rows purged from all tables
-    let c_post: i64 = conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0)).unwrap();
+    let c_post: i64 = conn
+        .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(c_post, 0);
-    let v_post: i64 = conn.query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0)).unwrap();
+    let v_post: i64 = conn
+        .query_row("SELECT COUNT(*) FROM vec_chunks", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(v_post, 0);
-    let f_post: i64 = conn.query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0)).unwrap();
+    let f_post: i64 = conn
+        .query_row("SELECT COUNT(*) FROM fts_notes", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(f_post, 0);
 
     // Foreign key integrity check
@@ -622,5 +842,8 @@ fn test_adv_10_large_scale_cascade_and_foreign_key_check() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert!(violations.is_empty(), "Database must pass PRAGMA foreign_key_check");
+    assert!(
+        violations.is_empty(),
+        "Database must pass PRAGMA foreign_key_check"
+    );
 }

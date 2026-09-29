@@ -89,8 +89,12 @@ impl rusqlite::types::ToSql for CoalaType {
 impl rusqlite::types::FromSql for CoalaType {
     fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
         let s = value.as_str()?;
-        s.parse::<Self>()
-            .map_err(|e| rusqlite::types::FromSqlError::Other(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))))
+        s.parse::<Self>().map_err(|e| {
+            rusqlite::types::FromSqlError::Other(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e,
+            )))
+        })
     }
 }
 
@@ -101,7 +105,12 @@ pub enum NoteStatus {
     #[default]
     #[serde(alias = "active", alias = "actif")]
     Active,
-    #[serde(alias = "deprecated", alias = "obsolete", alias = "archive", alias = "archived")]
+    #[serde(
+        alias = "deprecated",
+        alias = "obsolete",
+        alias = "archive",
+        alias = "archived"
+    )]
     Deprecated,
 }
 
@@ -176,8 +185,12 @@ impl rusqlite::types::ToSql for NoteStatus {
 impl rusqlite::types::FromSql for NoteStatus {
     fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
         let s = value.as_str()?;
-        s.parse::<Self>()
-            .map_err(|e| rusqlite::types::FromSqlError::Other(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))))
+        s.parse::<Self>().map_err(|e| {
+            rusqlite::types::FromSqlError::Other(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e,
+            )))
+        })
     }
 }
 
@@ -535,7 +548,10 @@ mod tests {
 
     #[test]
     fn test_coala_type_serde_and_aliases() -> Result<(), Box<dyn std::error::Error>> {
-        assert_eq!(serde_json::to_string(&CoalaType::Procedural)?, "\"procedural\"");
+        assert_eq!(
+            serde_json::to_string(&CoalaType::Procedural)?,
+            "\"procedural\""
+        );
         assert_eq!(serde_json::to_string(&CoalaType::Episodic)?, "\"episodic\"");
         assert_eq!(serde_json::to_string(&CoalaType::Semantic)?, "\"semantic\"");
 
@@ -556,7 +572,10 @@ mod tests {
     #[test]
     fn test_note_status_serde_and_aliases() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(serde_json::to_string(&NoteStatus::Active)?, "\"active\"");
-        assert_eq!(serde_json::to_string(&NoteStatus::Deprecated)?, "\"deprecated\"");
+        assert_eq!(
+            serde_json::to_string(&NoteStatus::Deprecated)?,
+            "\"deprecated\""
+        );
 
         let a: NoteStatus = serde_json::from_str("\"actif\"")?;
         assert!(a.is_active());
@@ -624,7 +643,10 @@ Body content"#;
 
         assert_eq!(fm.coala_type(), CoalaType::Procedural);
         assert_eq!(fm.status(), NoteStatus::Deprecated);
-        assert_eq!(fm.clean_superseded_by(), Some("Notes/OldNote.md".to_string()));
+        assert_eq!(
+            fm.clean_superseded_by(),
+            Some("Notes/OldNote.md".to_string())
+        );
         assert_eq!(fm.deprecated_at, Some(1789207200));
         assert_eq!(fm.parse_date_creation(), Some(1768464000));
         Ok(())

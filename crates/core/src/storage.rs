@@ -383,7 +383,9 @@ impl StorageManager {
 
     /// Retourne l'identifiant entier unique (rowid) d'un fragment par son chunk_id textuel.
     pub fn get_chunk_rowid(&self, chunk_id: &str) -> Result<Option<i64>> {
-        let mut stmt = self.conn.prepare("SELECT id FROM chunks WHERE chunk_id = ?1;")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM chunks WHERE chunk_id = ?1;")?;
         let mut rows = stmt.query(rusqlite::params![chunk_id])?;
         if let Some(row) = rows.next()? {
             Ok(Some(row.get(0)?))

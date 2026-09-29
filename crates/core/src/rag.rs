@@ -206,7 +206,9 @@ impl RagEngine {
         let mut link_cache: HashMap<String, Option<String>> = HashMap::new();
 
         for (rowid, dist) in &vec_results {
-            let mut rows = stmt.query(rusqlite::params![rowid]).map_err(RagError::Database)?;
+            let mut rows = stmt
+                .query(rusqlite::params![rowid])
+                .map_err(RagError::Database)?;
             if let Some(row) = rows.next().map_err(RagError::Database)? {
                 let chunk_id: String = row.get(1).map_err(RagError::Database)?;
                 let file_path: String = row.get(2).map_err(RagError::Database)?;

@@ -165,8 +165,16 @@ fn benchmark_bm25_search_latency() {
     let (rss_kb, hwm_kb) = get_memory_stats_kb();
     if rss_kb > 0 || hwm_kb > 0 {
         println!("Memory Footprint under Hybrid RAG Workload :");
-        println!("- Current RSS : {} KB ({:.2} MB)", rss_kb, rss_kb as f64 / 1024.0);
-        println!("- Peak RSS (VmHWM) : {} KB ({:.2} MB)", hwm_kb, hwm_kb as f64 / 1024.0);
+        println!(
+            "- Current RSS : {} KB ({:.2} MB)",
+            rss_kb,
+            rss_kb as f64 / 1024.0
+        );
+        println!(
+            "- Peak RSS (VmHWM) : {} KB ({:.2} MB)",
+            hwm_kb,
+            hwm_kb as f64 / 1024.0
+        );
         // Exigence contractuelle stricte : RSS résidente < 200 Mo (204 800 Ko)
         assert!(
             hwm_kb < 200 * 1024,
@@ -263,8 +271,16 @@ async fn stress_concurrency_and_debouncing_under_load() {
     let (rss_kb, hwm_kb) = get_memory_stats_kb();
     if rss_kb > 0 || hwm_kb > 0 {
         println!("Memory Footprint under Concurrency Stress Workload :");
-        println!("- Current RSS : {} KB ({:.2} MB)", rss_kb, rss_kb as f64 / 1024.0);
-        println!("- Peak RSS (VmHWM) : {} KB ({:.2} MB)", hwm_kb, hwm_kb as f64 / 1024.0);
+        println!(
+            "- Current RSS : {} KB ({:.2} MB)",
+            rss_kb,
+            rss_kb as f64 / 1024.0
+        );
+        println!(
+            "- Peak RSS (VmHWM) : {} KB ({:.2} MB)",
+            hwm_kb,
+            hwm_kb as f64 / 1024.0
+        );
         assert!(
             hwm_kb < 200 * 1024,
             "L'empreinte mémoire résidente maximale ({hwm_kb} KB) dépasse le plafond strict de 200 Mo"

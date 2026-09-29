@@ -6,8 +6,7 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::io::AsyncWriteExt;
 
 use jeanne_core::{
-    CoalaType, IndexedChunk, NoteFrontmatter, NoteStatus, SearchResult, StorageManager, VaultStats,
-    VaultWatcher,
+    IndexedChunk, NoteFrontmatter, SearchResult, StorageManager, VaultStats, VaultWatcher,
 };
 
 /// État applicatif partagé contenant l'accès sécurisé au moteur SQLite et le chemin racine du coffre.
@@ -505,6 +504,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jeanne_core::{CoalaType, NoteStatus};
 
     #[test]
     fn test_core_version_command() {
