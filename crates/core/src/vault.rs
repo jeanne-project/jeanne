@@ -344,20 +344,39 @@ async fn reconcile_batch(
             }
 
             let token_count = body.split_whitespace().count();
+            let date_creation = match frontmatter.parse_date_creation() {
+                Some(ts) => ts,
+                None => item.now,
+            };
+            let superseded_by = frontmatter.clean_superseded_by();
+            let deprecated_at = frontmatter.deprecated_at;
+
             let chunk = crate::models::IndexedChunk {
+                id: None,
                 chunk_id: format!("{}:0", item.rel_path),
                 file_path: item.rel_path.clone(),
                 chunk_index: 0,
                 content: body,
                 token_count,
-                note_type: frontmatter.note_type,
-                statut: frontmatter.statut,
-                date_creation: item.now,
+                coala_type: frontmatter.coala_type(),
+                status: frontmatter.status(),
+                superseded_by: superseded_by.clone(),
+                deprecated_at,
+                date_creation,
             };
 
             if let Err(e) = storage.index_chunk(&chunk) {
                 tx_result = Err(e);
                 break;
+            }
+
+            if let Some(target) = superseded_by {
+                let _ = storage.insert_file_link(
+                    &item.rel_path,
+                    &target,
+                    crate::models::FileLink::TYPE_SUPERSEDES,
+                    item.now,
+                );
             }
         }
     }

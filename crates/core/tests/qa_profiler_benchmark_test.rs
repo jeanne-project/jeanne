@@ -2,9 +2,32 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
-use jeanne_core::models::IndexedChunk;
+use jeanne_core::models::{CoalaType, IndexedChunk, NoteStatus};
+use jeanne_core::rag::RagEngine;
 use jeanne_core::storage::StorageManager;
 use jeanne_core::vault::VaultWatcher;
+
+/// Helper to read Resident RSS and Peak RSS (High Water Mark) from Linux /proc/self/status.
+fn get_memory_stats_kb() -> (usize, usize) {
+    let mut vmrss = 0;
+    let mut vmhwm = 0;
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if line.starts_with("VmRSS:") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    vmrss = parts[1].parse().unwrap_or(0);
+                }
+            } else if line.starts_with("VmHWM:") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    vmhwm = parts[1].parse().unwrap_or(0);
+                }
+            }
+        }
+    }
+    (vmrss, vmhwm)
+}
 
 /// Protocole QA-Profiler 1 : Benchmark de Latence BM25 FTS5
 /// Critère contractuel : Latence de recherche < 15 ms sur un coffre indexé.
@@ -39,19 +62,29 @@ fn benchmark_bm25_search_latency() {
         };
 
         let chunk = IndexedChunk {
+            id: None,
             chunk_id: format!("{file_path}:0"),
             file_path,
             chunk_index: 0,
             content,
             token_count: 15,
-            note_type: "semantique".to_string(),
-            statut: "actif".to_string(),
+            coala_type: CoalaType::Semantic,
+            status: NoteStatus::Active,
+            superseded_by: None,
+            deprecated_at: None,
             date_creation: 1710000000 + i as i64,
         };
-        storage.index_chunk(&chunk).expect("Indexation chunk");
+        let rowid = storage.index_chunk(&chunk).expect("Indexation chunk");
+
+        // Ingestion du vecteur 384D correspondant pour benchmark hybride
+        let mut vec = [0.0f32; 384];
+        vec[i % 5] = 1.0;
+        storage
+            .insert_chunk_vector(rowid, &vec)
+            .expect("Insertion vecteur");
     }
 
-    // 2. Exécution de 100 requêtes de recherche représentatives et mesure de la latence
+    // 2. Exécution de 100 requêtes de recherche représentatives et mesure de la latence BM25
     let queries = [
         "architecture",
         "souveraine",
@@ -92,6 +125,54 @@ fn benchmark_bm25_search_latency() {
         p95 < Duration::from_millis(15),
         "La latence P95 ({p95:?}) doit être strictement inférieure au plafond de 15 ms"
     );
+
+    // 3. Exécution de 100 requêtes de recherche Hybride RAG (Dense Vector + BM25 + Time-Decay)
+    let engine = RagEngine::new(Arc::new(Mutex::new(storage)));
+    let mut hybrid_latencies = Vec::with_capacity(100);
+
+    for (idx, q) in queries.iter().cycle().take(100).enumerate() {
+        let mut query_vec = [0.0f32; 384];
+        query_vec[idx % 5] = 1.0;
+        let start = Instant::now();
+        let results = engine
+            .search(q, &query_vec, 10)
+            .expect("Recherche Hybride RAG");
+        let elapsed = start.elapsed();
+        hybrid_latencies.push(elapsed);
+        assert!(
+            !results.is_empty(),
+            "La recherche hybride doit retourner des résultats pour '{q}'"
+        );
+    }
+
+    hybrid_latencies.sort();
+    let h_p50 = hybrid_latencies[50];
+    let h_p95 = hybrid_latencies[95];
+    let h_max = hybrid_latencies[99];
+
+    println!("Hybrid RAG Latency Benchmark Results (100 iterations) :");
+    println!("- P50 : {h_p50:?}");
+    println!("- P95 : {h_p95:?}");
+    println!("- Max : {h_max:?}");
+
+    // Assertion contractuelle : Latence P95 strictement inférieure à 30 ms
+    assert!(
+        h_p95 < Duration::from_millis(30),
+        "La latence P95 Hybride ({h_p95:?}) doit être strictement inférieure à 30 ms"
+    );
+
+    // 4. Profilage de l'empreinte mémoire résidente (RSS)
+    let (rss_kb, hwm_kb) = get_memory_stats_kb();
+    if rss_kb > 0 || hwm_kb > 0 {
+        println!("Memory Footprint under Hybrid RAG Workload :");
+        println!("- Current RSS : {} KB ({:.2} MB)", rss_kb, rss_kb as f64 / 1024.0);
+        println!("- Peak RSS (VmHWM) : {} KB ({:.2} MB)", hwm_kb, hwm_kb as f64 / 1024.0);
+        // Exigence contractuelle stricte : RSS résidente < 200 Mo (204 800 Ko)
+        assert!(
+            hwm_kb < 200 * 1024,
+            "L'empreinte mémoire résidente maximale ({hwm_kb} KB) dépasse le plafond strict de 200 Mo"
+        );
+    }
 }
 
 /// Protocole QA-Profiler 2 : Stress de Concurrence SQLite (WAL Mode) & Dé-rebond Watcher
@@ -177,4 +258,16 @@ async fn stress_concurrency_and_debouncing_under_load() {
     );
 
     watcher.stop();
+
+    // 5. Profilage de l'empreinte mémoire résidente sous charge concurrente
+    let (rss_kb, hwm_kb) = get_memory_stats_kb();
+    if rss_kb > 0 || hwm_kb > 0 {
+        println!("Memory Footprint under Concurrency Stress Workload :");
+        println!("- Current RSS : {} KB ({:.2} MB)", rss_kb, rss_kb as f64 / 1024.0);
+        println!("- Peak RSS (VmHWM) : {} KB ({:.2} MB)", hwm_kb, hwm_kb as f64 / 1024.0);
+        assert!(
+            hwm_kb < 200 * 1024,
+            "L'empreinte mémoire résidente maximale ({hwm_kb} KB) dépasse le plafond strict de 200 Mo"
+        );
+    }
 }

@@ -1,4 +1,4 @@
-use jeanne_core::models::IndexedChunk;
+use jeanne_core::models::{CoalaType, IndexedChunk, NoteStatus};
 use jeanne_core::parser::parse_markdown;
 use jeanne_core::storage::StorageManager;
 use jeanne_core::vault::resolve_vault_path;
@@ -163,13 +163,16 @@ fn test_01_03_indexing_bm25_search_and_cascade_delete() {
     ).expect("Échec insertion fichier");
 
     let chunk = IndexedChunk {
+        id: None,
         chunk_id: "chunk_arch_01".to_string(),
         file_path: "Notes/Architecture.md".to_string(),
         chunk_index: 0,
         content: "Jeanne implémente une architecture souveraine File-over-App garantissant la pérennité des données.".to_string(),
         token_count: 14,
-        note_type: "semantique".to_string(),
-        statut: "actif".to_string(),
+        coala_type: CoalaType::Semantic,
+        status: NoteStatus::Active,
+        superseded_by: None,
+        deprecated_at: None,
         date_creation: 1710000000,
     };
 
@@ -253,14 +256,17 @@ fn test_01_05_fts_xss_protection_and_query_resilience() {
         .expect("upsert file");
 
     let chunk = IndexedChunk {
+        id: None,
         chunk_id: "chunk_xss_01".to_string(),
         file_path: "notes/xss.md".to_string(),
         chunk_index: 0,
         content: "Voici une injection <script>alert('xss')</script> et <img src=x onerror=evil()> avec motclef."
             .to_string(),
         token_count: 12,
-        note_type: "semantique".to_string(),
-        statut: "actif".to_string(),
+        coala_type: CoalaType::Semantic,
+        status: NoteStatus::Active,
+        superseded_by: None,
+        deprecated_at: None,
         date_creation: 1700000000,
     };
     storage.index_chunk(&chunk).expect("index chunk");

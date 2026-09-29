@@ -25,3 +25,4 @@ checksums/
 coverage/
 *.profraw
 *.profdata
+.agents/

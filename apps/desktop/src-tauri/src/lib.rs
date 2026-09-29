@@ -6,7 +6,8 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::io::AsyncWriteExt;
 
 use jeanne_core::{
-    IndexedChunk, NoteFrontmatter, SearchResult, StorageManager, VaultStats, VaultWatcher,
+    CoalaType, IndexedChunk, NoteFrontmatter, NoteStatus, SearchResult, StorageManager, VaultStats,
+    VaultWatcher,
 };
 
 /// État applicatif partagé contenant l'accès sécurisé au moteur SQLite et le chemin racine du coffre.
@@ -124,13 +125,16 @@ async fn capture_quick_note_core(
         .map_err(|e| e.to_string())?;
 
     let chunk = IndexedChunk {
+        id: None,
         chunk_id: format!("{rel_path}:0"),
         file_path: rel_path.clone(),
         chunk_index: 0,
         content: body,
         token_count: body_text.split_whitespace().count(),
-        note_type: frontmatter.note_type,
-        statut: frontmatter.statut,
+        coala_type: frontmatter.coala_type(),
+        status: frontmatter.status(),
+        superseded_by: frontmatter.clean_superseded_by(),
+        deprecated_at: frontmatter.deprecated_at,
         date_creation: now.timestamp(),
     };
     storage.index_chunk(&chunk).map_err(|e| e.to_string())?;
@@ -527,13 +531,16 @@ mod tests {
             s.upsert_file("Journal/2026-09-12.md", "hash1", 1710000000, None)
                 .expect("upsert file");
             s.index_chunk(&IndexedChunk {
+                id: None,
                 chunk_id: "Journal/2026-09-12.md:0".to_string(),
                 file_path: "Journal/2026-09-12.md".to_string(),
                 chunk_index: 0,
                 content: "Note rapide de réunion sur l'architecture Jeanne".to_string(),
                 token_count: 8,
-                note_type: "episodique".to_string(),
-                statut: "actif".to_string(),
+                coala_type: CoalaType::Episodic,
+                status: NoteStatus::Active,
+                superseded_by: None,
+                deprecated_at: None,
                 date_creation: 1710000000,
             })
             .expect("index chunk");

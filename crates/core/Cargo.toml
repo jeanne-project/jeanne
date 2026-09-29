@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
+sqlite-vec = "0.1"
 notify = "6.1"
 gray_matter = "0.2"
 thiserror = "2.0"
