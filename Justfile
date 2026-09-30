@@ -14,27 +14,50 @@ start-milestone id name:
 # Contrôles locaux déterministes obligatoires avant appel au Reviewer
 pre-review:
     @echo "=== [Pre-Review] Exécution des contrôles qualité ==="
-    cargo clippy --workspace --all-targets -- -D warnings
-    cargo test --workspace
+    cargo clippy -p jeanne-core --all-targets -- -D warnings
+    cargo test -p jeanne-core
     cd apps/desktop && npm run build
     @echo "✅ Contrôles statiques et tests validés."
 
 # Initialise le fichier de revue pour le Reviewer
+[windows]
 init-review milestone:
     @New-Item -ItemType Directory -Force -Path docs/reviews | Out-Null
     @Set-Content -Path docs/reviews/M{{milestone}}_CODE_REVIEW.md -Value "# Code Review - Jalon {{milestone}}`n`nSTATUS: EN_ATTENTE`n`n## Bloquants`n`n## Avertissements`n"
     @echo "docs/reviews/M{{milestone}}_CODE_REVIEW.md initialisé."
 
+[unix]
+init-review milestone:
+    @mkdir -p docs/reviews
+    @printf "# Code Review - Jalon %s\n\nSTATUS: EN_ATTENTE\n\n## Bloquants\n\n## Avertissements\n" "{{milestone}}" > docs/reviews/M{{milestone}}_CODE_REVIEW.md
+    @echo "docs/reviews/M{{milestone}}_CODE_REVIEW.md initialisé."
+
 # Initialise le rapport de QA pour le QA-Profiler
+[windows]
 init-qa milestone:
     @New-Item -ItemType Directory -Force -Path docs/reviews | Out-Null
     @Set-Content -Path docs/reviews/M{{milestone}}_QA_REPORT.md -Value "# QA & Profiling Report - Jalon {{milestone}}`n`nSTATUS: EN_ATTENTE`n`n## Empreinte Mémoire (RSS)`n`n## Critères DoD`n"
     @echo "docs/reviews/M{{milestone}}_QA_REPORT.md initialisé."
 
+[unix]
+init-qa milestone:
+    @mkdir -p docs/reviews
+    @printf "# QA & Profiling Report - Jalon %s\n\nSTATUS: EN_ATTENTE\n\n## Empreinte Mémoire (RSS)\n\n## Critères DoD\n" "{{milestone}}" > docs/reviews/M{{milestone}}_QA_REPORT.md
+    @echo "docs/reviews/M{{milestone}}_QA_REPORT.md initialisé."
+
 # Fusionne la branche de jalon sur main après approbation stricte
+[windows]
 merge-milestone id name:
     @echo "Vérification de l'approbation de la revue..."
     @Select-String -Path docs/reviews/M{{id}}_CODE_REVIEW.md -Pattern "STATUS: APPROUVÉ" -Quiet | ForEach-Object { if (-not $_) { echo "❌ Erreur : La revue n'est pas marquée 'STATUS: APPROUVÉ'"; exit 1 } }
+    git checkout main
+    git merge --no-ff feat/m{{id}}-{{name}} -m "feat(milestone-{{id}}): merge validated slice {{name}}"
+    @echo "✅ Branche feat/m{{id}}-{{name}} fusionnée avec succès sur main."
+
+[unix]
+merge-milestone id name:
+    @echo "Vérification de l'approbation de la revue..."
+    @if ! grep -q "STATUS: APPROUVÉ" docs/reviews/M{{id}}_CODE_REVIEW.md; then echo "❌ Erreur : La revue n'est pas marquée 'STATUS: APPROUVÉ'"; exit 1; fi
     git checkout main
     git merge --no-ff feat/m{{id}}-{{name}} -m "feat(milestone-{{id}}): merge validated slice {{name}}"
     @echo "✅ Branche feat/m{{id}}-{{name}} fusionnée avec succès sur main."

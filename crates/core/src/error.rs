@@ -63,8 +63,21 @@ pub enum JeanneError {
     #[error("RAG error: {0}")]
     Rag(#[from] RagError),
 
+    #[error("LLM error: {0}")]
+    Llm(#[from] crate::llm::LlmError),
+
     #[error("Feature not implemented: {0}")]
     NotImplemented(String),
+}
+
+impl From<JeanneError> for crate::llm::LlmError {
+    fn from(err: JeanneError) -> Self {
+        match err {
+            JeanneError::Llm(inner) => inner,
+            JeanneError::Serialization(e) => crate::llm::LlmError::Serialization(e),
+            other => crate::llm::LlmError::Config(other.to_string()),
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, JeanneError>;
