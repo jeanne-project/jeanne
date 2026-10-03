@@ -111,7 +111,7 @@
     if (/^[\d\s+\-*/^%().,]+$/.test(clean) && /[+\-*/^%]/.test(clean) && /\d/.test(clean)) {
       invoke<number>('evaluate_math', { expression: clean })
         .then((res) => {
-          mathResult = res;
+          mathResult = typeof res === 'number' ? Math.round(res * 1e12) / 1e12 : res;
         })
         .catch(() => {
           mathResult = null;

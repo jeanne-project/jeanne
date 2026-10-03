@@ -32,6 +32,41 @@ pub struct MathEvaluationResult {
     pub formatted: String,
 }
 
+/// Nettoie les artefacts d'imprécision binaire IEEE-754 des nombres flottants.
+/// Exemples :
+/// - 1.2 * 56.4 = 67.67999999999999 -> 67.68
+/// - 0.1 + 0.2 = 0.30000000000000004 -> 0.3
+pub fn sanitize_float_precision(val: f64) -> f64 {
+    if val == 0.0 || !val.is_finite() {
+        return val;
+    }
+    let mag = val.abs().log10().floor() as i32;
+    if !( -15..=15 ).contains(&mag) {
+        let formatted = format!("{:.12e}", val);
+        return formatted.parse::<f64>().unwrap_or(val);
+    }
+    let decimals = (12 - 1 - mag).clamp(0, 18) as usize;
+    let formatted = format!("{:.decimals$}", val, decimals = decimals);
+    formatted.parse::<f64>().unwrap_or(val)
+}
+
+/// Formate un résultat arithmétique en chaîne sans artefact flottant.
+pub fn format_math_result(val: f64) -> String {
+    let sanitized = sanitize_float_precision(val);
+    format!("{sanitized}")
+}
+
+/// Évalue une expression mathématique et retourne un `MathEvaluationResult` structuré.
+pub fn evaluate_math_detailed(input: &str) -> Result<MathEvaluationResult, String> {
+    let result = evaluate_math_expression(input)?;
+    let formatted = format_math_result(result);
+    Ok(MathEvaluationResult {
+        expression: input.trim().to_string(),
+        result,
+        formatted,
+    })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Évaluateur Arithmétique Déterministe et Sécurisé (Recursive Descent)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,7 +95,7 @@ pub fn evaluate_math_expression(input: &str) -> Result<f64, String> {
         return Err("Résultat mathématique indéfini ou infini".to_string());
     }
 
-    Ok(res)
+    Ok(sanitize_float_precision(res))
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -97,23 +132,25 @@ fn tokenize_math(input: &str) -> Result<Vec<Token>, String> {
             '^' => tokens.push(Token::Power),
             '(' => tokens.push(Token::LParen),
             ')' => tokens.push(Token::RParen),
-            '0'..='9' | '.' => {
+            '0'..='9' | '.' | ',' => {
                 let mut num_str = String::new();
                 let mut has_dot = false;
-                while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
-                    if chars[i] == '.' {
+                while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == ',') {
+                    if chars[i] == '.' || chars[i] == ',' {
                         if has_dot {
-                            return Err("Nombre décimal invalide avec multiples points".to_string());
+                            return Err("Nombre décimal invalide avec multiples points ou virgules".to_string());
                         }
                         has_dot = true;
+                        num_str.push('.');
+                    } else {
+                        num_str.push(chars[i]);
                     }
-                    num_str.push(chars[i]);
                     i += 1;
                 }
                 let val = num_str
                     .parse::<f64>()
                     .map_err(|e| format!("Nombre invalide : {e}"))?;
-                tokens.push(Token::Number(val));
+                tokens.push(Token::Number(sanitize_float_precision(val)));
                 continue;
             }
             _ => return Err(format!("Caractère non arithmétique : '{c}'")),
@@ -131,11 +168,11 @@ fn parse_expression(tokens: &[Token], pos: &mut usize) -> Result<f64, String> {
         match tokens[*pos] {
             Token::Plus => {
                 *pos += 1;
-                val += parse_term(tokens, pos)?;
+                val = sanitize_float_precision(val + parse_term(tokens, pos)?);
             }
             Token::Minus => {
                 *pos += 1;
-                val -= parse_term(tokens, pos)?;
+                val = sanitize_float_precision(val - parse_term(tokens, pos)?);
             }
             _ => break,
         }
@@ -150,7 +187,7 @@ fn parse_term(tokens: &[Token], pos: &mut usize) -> Result<f64, String> {
         match tokens[*pos] {
             Token::Multiply => {
                 *pos += 1;
-                val *= parse_power(tokens, pos)?;
+                val = sanitize_float_precision(val * parse_power(tokens, pos)?);
             }
             Token::Divide => {
                 *pos += 1;
@@ -158,7 +195,7 @@ fn parse_term(tokens: &[Token], pos: &mut usize) -> Result<f64, String> {
                 if denom.abs() < f64::EPSILON {
                     return Err("Division par zéro".to_string());
                 }
-                val /= denom;
+                val = sanitize_float_precision(val / denom);
             }
             Token::Modulo => {
                 *pos += 1;
@@ -166,7 +203,7 @@ fn parse_term(tokens: &[Token], pos: &mut usize) -> Result<f64, String> {
                 if denom.abs() < f64::EPSILON {
                     return Err("Modulo par zéro".to_string());
                 }
-                val %= denom;
+                val = sanitize_float_precision(val % denom);
             }
             _ => break,
         }
@@ -180,7 +217,7 @@ fn parse_power(tokens: &[Token], pos: &mut usize) -> Result<f64, String> {
     if *pos < tokens.len() && tokens[*pos] == Token::Power {
         *pos += 1;
         let exp = parse_power(tokens, pos)?;
-        Ok(base.powf(exp))
+        Ok(sanitize_float_precision(base.powf(exp)))
     } else {
         Ok(base)
     }
@@ -529,5 +566,38 @@ fn ensure_trailing_newline(text: &str) -> String {
         text.to_string()
     } else {
         format!("{text}\n")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_float_sanitization_user_case() {
+        // Cas exact signalé par l'utilisateur
+        let res = evaluate_math_expression("1.2*56.4").unwrap();
+        assert_eq!(res, 67.68);
+        assert_eq!(format_math_result(res), "67.68");
+
+        // Cas avec virgule
+        let res_comma = evaluate_math_expression("1,2*56,4").unwrap();
+        assert_eq!(res_comma, 67.68);
+
+        // Évaluation détaillée
+        let detailed = evaluate_math_detailed("1.2 * 56.4").unwrap();
+        assert_eq!(detailed.result, 67.68);
+        assert_eq!(detailed.formatted, "67.68");
+        assert_eq!(detailed.expression, "1.2 * 56.4");
+    }
+
+    #[test]
+    fn test_float_sanitization_edge_cases() {
+        assert_eq!(evaluate_math_expression("0.1 + 0.2").unwrap(), 0.3);
+        assert_eq!(evaluate_math_expression("0.3 - 0.1").unwrap(), 0.2);
+        assert_eq!(evaluate_math_expression("1.15 * 100").unwrap(), 115.0);
+        assert_eq!(evaluate_math_expression("35.7 * 100").unwrap(), 3570.0);
+        assert_eq!(evaluate_math_expression("1.2 * 56.4 - 67.68").unwrap(), 0.0);
+        assert_eq!(evaluate_math_expression("9 ^ 0.5").unwrap(), 3.0);
     }
 }

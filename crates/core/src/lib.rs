@@ -19,8 +19,8 @@ pub use model_discovery::{
 
 pub use productivity::{
     MathEvaluationResult, SnippetItem, TaskItem, append_bookmark, append_log_entry, append_todo,
-    create_meeting_note, evaluate_math_expression, extract_tasks_from_file, load_snippets,
-    toggle_task_in_file,
+    create_meeting_note, evaluate_math_detailed, evaluate_math_expression, extract_tasks_from_file,
+    format_math_result, load_snippets, sanitize_float_precision, toggle_task_in_file,
 };
 
 pub use error::{JeanneError, RagError, Result};

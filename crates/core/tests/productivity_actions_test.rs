@@ -11,6 +11,30 @@ fn test_prod_01_evaluate_simple_math() {
 }
 
 #[test]
+fn test_prod_01b_evaluate_float_precision_and_commas() {
+    // Cas signalé par l'utilisateur : 1.2 * 56.4 doit valoir exactement 67.68 sans artefact float (67.67999999999999)
+    let res = evaluate_math_expression("1.2*56.4").expect("Should evaluate 1.2*56.4");
+    assert_eq!(res, 67.68, "1.2*56.4 doit être exactement 67.68 et non 67.67999999999999");
+
+    // Support des séparateurs décimaux français (virgule)
+    let res_comma = evaluate_math_expression("1,2 * 56,4").expect("Should evaluate 1,2 * 56,4 with commas");
+    assert_eq!(res_comma, 67.68, "1,2*56,4 avec virgules doit valoir 67.68");
+
+    // Autres cas classiques de précision IEEE-754
+    let res_add = evaluate_math_expression("0.1 + 0.2").expect("Should evaluate 0.1 + 0.2");
+    assert_eq!(res_add, 0.3, "0.1 + 0.2 doit être exactement 0.3 et non 0.30000000000000004");
+
+    let res_sub = evaluate_math_expression("0.3 - 0.1").expect("Should evaluate 0.3 - 0.1");
+    assert_eq!(res_sub, 0.2, "0.3 - 0.1 doit être exactement 0.2");
+
+    let res_mult = evaluate_math_expression("35.7 * 100").expect("Should evaluate 35.7 * 100");
+    assert_eq!(res_mult, 3570.0, "35.7 * 100 doit être exactement 3570.0");
+
+    let res_diff = evaluate_math_expression("1.2 * 56.4 - 67.68").expect("Should evaluate chained subtraction");
+    assert_eq!(res_diff, 0.0, "1.2 * 56.4 - 67.68 doit être exactement 0.0");
+}
+
+#[test]
 fn test_prod_02_evaluate_nested_parentheses_math() {
     let res = evaluate_math_expression("((10 + 20) * 3) / 2").expect("Should evaluate parentheses");
     assert!((res - 45.0).abs() < 1e-6);

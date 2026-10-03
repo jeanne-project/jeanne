@@ -128,7 +128,7 @@ export interface SnippetItem {
 
 ## 3. Scénarios & Cas Limites
 
-1. **Calculatrice Inline** : Détecte automatiquement si la requête de l'utilisateur correspond à une expression arithmétique basique (`+`, `-`, `*`, `/`, `^`, `%`, `()`, nombres à virgule). En cas d'erreur de syntaxe ou division par zéro, la calculatrice n'affiche rien et laisse la recherche classique s'exécuter sans bloquer.
+1. **Calculatrice Inline** : Détecte automatiquement si la requête de l'utilisateur correspond à une expression arithmétique basique (`+`, `-`, `*`, `/`, `^`, `%`, `()`, nombres à virgule avec point `.` ou virgule `,`). Nettoie systématiquement les artefacts de précision binaire IEEE-754 (ex: `1.2 * 56.4` donne exactement `67.68` et non `67.67999999999999`). En cas d'erreur de syntaxe ou division par zéro, la calculatrice n'affiche rien et laisse la recherche classique s'exécuter sans bloquer.
 2. **Gestion des Fichiers Manquants** : Si `Inbox.md`, `Journal/`, `Reunions/` ou `Ressources/Bookmarks.md` n'existent pas lors d'une action `/todo`, `/log` ou `/bookmark`, ils sont créés automatiquement avec un en-tête Markdown et frontmatter YAML standardisé.
 3. **Absence de Modèle Local pour les Actions IA** : Si l'utilisateur invoque `/corrige` ou `/ask` sans que le modèle local 3B ne soit chargé et sans clé API distante, une erreur explicite est renvoyée invitant à charger le modèle local dans le dashboard.
 
@@ -139,6 +139,7 @@ export interface SnippetItem {
 | ID Test | Composant | Action | Résultat Attendu |
 | :--- | :--- | :--- | :--- |
 | **TEST-PROD-01** | `evaluate_math_expression` | Évaluer `"12 * 4.5"` | Retourne `Ok(54.0)` |
+| **TEST-PROD-01b** | `evaluate_math_expression` | Évaluer `"1.2 * 56.4"` et `"1,2 * 56,4"` | Retourne `Ok(67.68)` sans dérive float |
 | **TEST-PROD-02** | `evaluate_math_expression` | Évaluer `"((10 + 20) * 3) / 2"` | Retourne `Ok(45.0)` |
 | **TEST-PROD-03** | `evaluate_math_expression` | Évaluer du texte non mathématique | Retourne `Err(...)` |
 | **TEST-PROD-04** | `append_todo` | Ajouter `"Acheter des câbles"` dans `Inbox.md` | Ligne `- [ ] [HH:MM] Acheter des câbles` ajoutée avec frontmatter |
