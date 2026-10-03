@@ -1,0 +1,51 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-vault-tasks"
+description = "Enables get_vault_tasks command."
+commands.allow = ["get_vault_tasks"]
+
+[[permission]]
+identifier = "allow-toggle-vault-task"
+description = "Enables toggle_vault_task command."
+commands.allow = ["toggle_vault_task"]
+
+[[permission]]
+identifier = "allow-execute-log"
+description = "Enables execute_log command."
+commands.allow = ["execute_log"]
+
+[[permission]]
+identifier = "allow-execute-meeting"
+description = "Enables execute_meeting command."
+commands.allow = ["execute_meeting"]
+
+[[permission]]
+identifier = "allow-execute-bookmark"
+description = "Enables execute_bookmark command."
+commands.allow = ["execute_bookmark"]
+
+[[permission]]
+identifier = "allow-get-snippets"
+description = "Enables get_snippets command."
+commands.allow = ["get_snippets"]
+
+[[permission]]
+identifier = "allow-evaluate-math"
+description = "Enables evaluate_math command."
+commands.allow = ["evaluate_math"]
+
+[[permission]]
+identifier = "allow-ai-process-clipboard"
+description = "Enables ai_process_clipboard command."
+commands.allow = ["ai_process_clipboard"]
+
+[[permission]]
+identifier = "allow-ask-vault"
+description = "Enables ask_vault command."
+commands.allow = ["ask_vault"]
+
+[[permission]]
+identifier = "allow-get-default-model-path"
+description = "Enables get_default_model_path command."
+commands.allow = ["get_default_model_path"]

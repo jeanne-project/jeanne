@@ -17,7 +17,18 @@
     "allow-load-local-model",
     "allow-unload-local-model",
     "allow-get-hardware-profile",
-    "allow-get-local-inference-stats"
+    "allow-get-local-inference-stats",
+    "allow-get-default-model-path",
+    "allow-execute-todo",
+    "allow-get-vault-tasks",
+    "allow-toggle-vault-task",
+    "allow-execute-log",
+    "allow-execute-meeting",
+    "allow-execute-bookmark",
+    "allow-get-snippets",
+    "allow-evaluate-math",
+    "allow-ai-process-clipboard",
+    "allow-ask-vault"
   ]
 }
 

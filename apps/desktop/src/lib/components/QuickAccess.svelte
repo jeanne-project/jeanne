@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { LogicalSize } from '@tauri-apps/api/dpi';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-  import type { SearchResult } from '../types/ipc';
+  import type { SearchResult, TaskItem, SnippetItem } from '../types/ipc';
 
   interface Props {
     mode?: 'overlay' | 'embedded';
@@ -17,6 +17,40 @@
   let statusMessage = $state<string | null>(null);
   let inputElement = $state<HTMLInputElement | null>(null);
 
+  // États pour les fonctionnalités étendues
+  let mathResult = $state<number | null>(null);
+  let tasksList = $state<TaskItem[]>([]);
+  let snippetsList = $state<SnippetItem[]>([]);
+  let scratchpadText = $state('');
+  let aiOutput = $state<string | null>(null);
+
+  // Minuteur actif
+  let timerActive = $state(false);
+  let timerSecondsLeft = $state(0);
+  let timerLabel = $state('');
+  let timerInterval: ReturnType<typeof setInterval> | null = null;
+
+  // Historique local du presse-papier
+  let clipboardHistory = $state<string[]>([]);
+
+  const COMMANDS = [
+    { cmd: '/note', label: 'Note rapide', desc: 'Horodater une note dans le Journal', icon: '📝' },
+    { cmd: '/todo', label: 'Tâche', desc: 'Ajouter une tâche à Inbox.md', icon: '✅' },
+    { cmd: '/tasks', label: 'Mes tâches', desc: 'Voir et cocher les tâches en cours', icon: '📋' },
+    { cmd: '/log', label: 'Micro-journal', desc: 'Ajouter une entrée horodatée au Journal', icon: '⏱️' },
+    { cmd: '/meeting', label: 'Réunion', desc: 'Créer une fiche de réunion structurée', icon: '🤝' },
+    { cmd: '/bookmark', label: 'Signet', desc: 'Enregistrer une URL dans Bookmarks.md', icon: '🔖' },
+    { cmd: '/snip', label: 'Snippets', desc: 'Insérer un modèle de texte réutilisable', icon: '✂️' },
+    { cmd: '/timer', label: 'Minuteur', desc: 'Lancer un compte à rebours (ex: /timer 25m Pause)', icon: '⏳' },
+    { cmd: '/clip', label: 'Presse-papier', desc: 'Historique des copies récentes', icon: '📎' },
+    { cmd: '/scratch', label: 'Brouillon', desc: 'Bloc-notes éphémère', icon: '📄' },
+    { cmd: '/corrige', label: 'IA Relecture', desc: 'Corriger orthographe/syntaxe du presse-papier', icon: '✨' },
+    { cmd: '/rephrase', label: 'IA Reformulation', desc: 'Reformuler le presse-papier (pro, court)', icon: '🔄' },
+    { cmd: '/tldr', label: 'IA Résumé', desc: 'Résumer le presse-papier en 3 puces clés', icon: '⚡' },
+    { cmd: '/trad', label: 'IA Traduction', desc: 'Traduire le presse-papier (ex: /trad anglais)', icon: '🌐' },
+    { cmd: '/ask', label: 'IA Questions', desc: 'Poser une question à votre coffre (RAG)', icon: '🧠' },
+  ];
+
   const currentWindow = getCurrentWebviewWindow();
   let isQuickAccessWindow = false;
   try {
@@ -26,8 +60,26 @@
   }
 
   const isEmbedded = $derived(mode === 'embedded' || !isQuickAccessWindow);
-  const isNoteCommand = $derived(query.trim().startsWith('/note'));
-  const hasResults = $derived(results.length > 0);
+
+  // Commandes détectées
+  const activeCommand = $derived.by(() => {
+    const trimmed = query.trim();
+    if (!trimmed.startsWith('/')) return null;
+    const firstWord = trimmed.split(' ')[0].toLowerCase();
+    return COMMANDS.find((c) => c.cmd === firstWord) ?? null;
+  });
+
+  const matchingCommandSuggestions = $derived.by(() => {
+    const trimmed = query.trim();
+    if (!trimmed.startsWith('/') || activeCommand) return [];
+    return COMMANDS.filter((c) => c.cmd.startsWith(trimmed.toLowerCase()));
+  });
+
+  const isMathQuery = $derived(mathResult !== null);
+  const isTasksView = $derived(activeCommand?.cmd === '/tasks');
+  const isSnippetsView = $derived(activeCommand?.cmd === '/snip');
+  const isScratchView = $derived(activeCommand?.cmd === '/scratch');
+  const isClipView = $derived(activeCommand?.cmd === '/clip');
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -39,7 +91,7 @@
       try {
         await currentWindow.setSize(new LogicalSize(720, targetHeight));
       } catch {
-        // Ignorer si l'API de redimensionnement n'est pas accessible en mode test
+        // Ignorer si l'API n'est pas accessible
       }
     }
   }
@@ -53,19 +105,74 @@
     }
   }
 
+  // Détection arithmétique inline
+  function checkMath(input: string) {
+    const clean = input.trim();
+    if (/^[\d\s+\-*/^%().,]+$/.test(clean) && /[+\-*/^%]/.test(clean) && /\d/.test(clean)) {
+      invoke<number>('evaluate_math', { expression: clean })
+        .then((res) => {
+          mathResult = res;
+        })
+        .catch(() => {
+          mathResult = null;
+        });
+    } else {
+      mathResult = null;
+    }
+  }
+
   async function executeSearch(searchQuery: string) {
     const trimmed = searchQuery.trim();
+    checkMath(trimmed);
+
     if (!trimmed) {
       results = [];
       selectedIndex = 0;
+      aiOutput = null;
       await adjustWindowSize(84);
       return;
     }
 
-    if (trimmed.startsWith('/note')) {
+    if (trimmed.startsWith('/')) {
       results = [];
       selectedIndex = 0;
-      await adjustWindowSize(115);
+
+      if (isTasksView) {
+        try {
+          tasksList = await invoke<TaskItem[]>('get_vault_tasks', { limit: 20 });
+          await adjustWindowSize(tasksList.length > 0 ? 380 : 120);
+        } catch {
+          tasksList = [];
+        }
+        return;
+      }
+
+      if (isSnippetsView) {
+        try {
+          snippetsList = await invoke<SnippetItem[]>('get_snippets');
+          await adjustWindowSize(380);
+        } catch {
+          snippetsList = [];
+        }
+        return;
+      }
+
+      if (isScratchView) {
+        await adjustWindowSize(320);
+        return;
+      }
+
+      if (isClipView) {
+        await adjustWindowSize(clipboardHistory.length > 0 ? 320 : 120);
+        return;
+      }
+
+      if (matchingCommandSuggestions.length > 0) {
+        await adjustWindowSize(Math.min(380, 84 + matchingCommandSuggestions.length * 48));
+        return;
+      }
+
+      await adjustWindowSize(130);
       return;
     }
 
@@ -77,7 +184,7 @@
       });
       results = searchHits;
       selectedIndex = 0;
-      await adjustWindowSize(searchHits.length > 0 ? 400 : 84);
+      await adjustWindowSize(searchHits.length > 0 ? 420 : 110);
     } catch (err) {
       statusMessage = `Erreur recherche : ${err}`;
       results = [];
@@ -87,14 +194,12 @@
     }
   }
 
-  // Déclenchement de la recherche avec debouncing
+  // Écouteur de debouncing sur query
   $effect(() => {
     const currentQ = query;
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-    }
+    if (debounceTimer) clearTimeout(debounceTimer);
 
-    const delay = currentQ.trim().startsWith('/note') ? 0 : 120;
+    const delay = currentQ.trim().startsWith('/') ? 40 : 120;
     debounceTimer = setTimeout(() => {
       executeSearch(currentQ);
     }, delay);
@@ -110,45 +215,209 @@
       if (!isEmbedded) {
         await hideWindow();
       } else {
-        statusMessage = `Note ouverte dans l'éditeur système : ${item.title || item.file_path}`;
-        setTimeout(() => {
-          statusMessage = null;
-        }, 2500);
+        notifyUser(`Note ouverte : ${item.title || item.file_path}`);
       }
     } catch (err) {
       statusMessage = `Impossible d'ouvrir : ${err}`;
     }
   }
 
-  async function handleCaptureNote() {
+  function notifyUser(msg: string) {
+    statusMessage = msg;
+    setTimeout(() => {
+      if (statusMessage === msg) statusMessage = null;
+    }, 3000);
+  }
+
+  async function copyToClipboard(text: string, notification?: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (!clipboardHistory.includes(text)) {
+        clipboardHistory = [text, ...clipboardHistory.slice(0, 14)];
+      }
+      notifyUser(notification ?? 'Copié dans le presse-papier !');
+    } catch {
+      notifyUser('Échec de copie');
+    }
+  }
+
+  // Exécution des commandes slash
+  async function handleExecuteCommand() {
     const trimmed = query.trim();
-    const noteBody = trimmed.startsWith('/note') ? trimmed.slice(5).trim() : trimmed;
-    if (!noteBody) {
-      statusMessage = 'Le contenu de la note ne peut pas être vide';
+    if (!trimmed) return;
+
+    if (mathResult !== null) {
+      await copyToClipboard(String(mathResult), `Résultat ${mathResult} copié !`);
+      query = '';
+      mathResult = null;
+      if (!isEmbedded) await hideWindow();
       return;
     }
 
+    const parts = trimmed.split(' ');
+    const cmd = parts[0].toLowerCase();
+    const arg = parts.slice(1).join(' ').trim();
+
     try {
       isLoading = true;
-      statusMessage = 'Enregistrement de la note...';
-      const path = await invoke<string>('capture_quick_note', { content: trimmed });
-      statusMessage = `Note enregistrée dans ${path}`;
-      query = '';
-      results = [];
-      if (!isEmbedded) {
-        setTimeout(async () => {
-          statusMessage = null;
-          await hideWindow();
-        }, 400);
-      } else {
-        setTimeout(() => {
-          statusMessage = null;
-        }, 3000);
+
+      switch (cmd) {
+        case '/note': {
+          if (!arg) throw new Error('Contenu de note requis');
+          const path = await invoke<string>('capture_quick_note', { content: trimmed });
+          notifyUser(`Note ajoutée au Journal : ${path}`);
+          query = '';
+          if (!isEmbedded) setTimeout(hideWindow, 500);
+          break;
+        }
+
+        case '/todo': {
+          if (!arg) throw new Error('Description de la tâche requise');
+          const path = await invoke<string>('execute_todo', { content: arg });
+          notifyUser(`Tâche ajoutée à Inbox.md : ${arg}`);
+          query = '';
+          if (!isEmbedded) setTimeout(hideWindow, 500);
+          break;
+        }
+
+        case '/log': {
+          if (!arg) throw new Error('Texte de journal requis');
+          await invoke<string>('execute_log', { content: arg });
+          notifyUser(`Entrée horodatée ajoutée au Journal du jour`);
+          query = '';
+          if (!isEmbedded) setTimeout(hideWindow, 500);
+          break;
+        }
+
+        case '/meeting': {
+          if (!arg) throw new Error('Titre de réunion requis');
+          const file = await invoke<string>('execute_meeting', { title: arg });
+          notifyUser(`Fiche de réunion créée : ${file}`);
+          await invoke('open_note_in_editor', { filePath: file });
+          query = '';
+          if (!isEmbedded) setTimeout(hideWindow, 500);
+          break;
+        }
+
+        case '/bookmark': {
+          if (!arg) throw new Error('URL du signet requise');
+          const urlParts = arg.split(' ');
+          const url = urlParts[0];
+          const comment = urlParts.slice(1).join(' ');
+          await invoke<string>('execute_bookmark', { url, comment: comment || undefined });
+          notifyUser(`Signet enregistré dans Bookmarks.md`);
+          query = '';
+          if (!isEmbedded) setTimeout(hideWindow, 500);
+          break;
+        }
+
+        case '/timer': {
+          if (!arg) throw new Error('Durée requise (ex: /timer 25m Pause)');
+          const timerParts = arg.split(' ');
+          const durStr = timerParts[0].toLowerCase();
+          const label = timerParts.slice(1).join(' ') || 'Minuteur';
+
+          let secs = 0;
+          if (durStr.endsWith('m')) secs = parseInt(durStr) * 60;
+          else if (durStr.endsWith('s')) secs = parseInt(durStr);
+          else if (durStr.endsWith('h')) secs = parseInt(durStr) * 3600;
+          else secs = parseInt(durStr) * 60;
+
+          if (isNaN(secs) || secs <= 0) throw new Error('Durée invalide (ex: 25m, 10s, 1h)');
+
+          startTimer(secs, label);
+          notifyUser(`Minuteur lancé : ${label} (${secs}s)`);
+          query = '';
+          break;
+        }
+
+        case '/corrige':
+        case '/rephrase':
+        case '/tldr':
+        case '/resume':
+        case '/trad': {
+          let text = '';
+          try {
+            text = await navigator.clipboard.readText();
+          } catch {
+            throw new Error('Impossible de lire le presse-papier');
+          }
+
+          if (!text.trim()) throw new Error('Le presse-papier est vide');
+
+          const action = cmd.replace('/', '');
+          const res = await invoke<string>('ai_process_clipboard', {
+            action,
+            text,
+            param: arg || undefined,
+          });
+
+          aiOutput = res;
+          await copyToClipboard(res, `Résultat IA copié dans le presse-papier !`);
+          notifyUser(`IA (${action}) : Résultat généré et copié !`);
+          break;
+        }
+
+        case '/ask': {
+          if (!arg) throw new Error('Question requise');
+          const answer = await invoke<string>('ask_vault', { question: arg });
+          aiOutput = answer;
+          await adjustWindowSize(400);
+          break;
+        }
+
+        default:
+          if (results.length > 0) {
+            await handleSelectResult(results[selectedIndex]);
+          }
+          break;
       }
-    } catch (err) {
-      statusMessage = `Erreur capture : ${err}`;
+    } catch (err: unknown) {
+      statusMessage = `Erreur : ${String(err)}`;
     } finally {
       isLoading = false;
+    }
+  }
+
+  function startTimer(seconds: number, label: string) {
+    if (timerInterval) clearInterval(timerInterval);
+    timerSecondsLeft = seconds;
+    timerLabel = label;
+    timerActive = true;
+
+    timerInterval = setInterval(() => {
+      timerSecondsLeft -= 1;
+      if (timerSecondsLeft <= 0) {
+        clearInterval(timerInterval!);
+        timerActive = false;
+        notifyUser(`⏰ Minuteur terminé : ${timerLabel} !`);
+        try {
+          // Bip audio standard Web Audio
+          const ctx = new AudioContext();
+          const osc = ctx.createOscillator();
+          osc.connect(ctx.destination);
+          osc.frequency.value = 880;
+          osc.start();
+          setTimeout(() => { osc.stop(); }, 500);
+        } catch {
+          // Ignoré si audio bloqué
+        }
+      }
+    }, 1000);
+  }
+
+  async function toggleTask(task: TaskItem) {
+    try {
+      await invoke('toggle_vault_task', {
+        filePath: task.file_path,
+        lineNumber: task.line_number,
+        checked: !task.checked,
+      });
+      task.checked = !task.checked;
+      tasksList = [...tasksList];
+      notifyUser(task.checked ? 'Tâche terminée !' : 'Tâche rouverte');
+    } catch (err) {
+      notifyUser(`Erreur mise à jour : ${err}`);
     }
   }
 
@@ -160,6 +429,8 @@
       } else {
         query = '';
         results = [];
+        mathResult = null;
+        aiOutput = null;
         statusMessage = null;
       }
       return;
@@ -167,7 +438,9 @@
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      if (results.length > 0) {
+      if (matchingCommandSuggestions.length > 0) {
+        selectedIndex = (selectedIndex + 1) % matchingCommandSuggestions.length;
+      } else if (results.length > 0) {
         selectedIndex = (selectedIndex + 1) % results.length;
       }
       return;
@@ -175,7 +448,9 @@
 
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      if (results.length > 0) {
+      if (matchingCommandSuggestions.length > 0) {
+        selectedIndex = (selectedIndex - 1 + matchingCommandSuggestions.length) % matchingCommandSuggestions.length;
+      } else if (results.length > 0) {
         selectedIndex = (selectedIndex - 1 + results.length) % results.length;
       }
       return;
@@ -183,58 +458,18 @@
 
     if (event.key === 'Enter') {
       event.preventDefault();
-      if (isNoteCommand) {
-        handleCaptureNote();
-      } else if (results.length > 0) {
-        handleSelectResult(results[selectedIndex]);
+      if (matchingCommandSuggestions.length > 0 && selectedIndex < matchingCommandSuggestions.length) {
+        query = matchingCommandSuggestions[selectedIndex].cmd + ' ';
+        return;
       }
+      handleExecuteCommand();
     }
   }
 
-  // Écouteurs de raccourcis/focus dédiés au mode overlay
   $effect(() => {
     if (!isEmbedded) {
       inputElement?.focus();
     }
-
-    if (isEmbedded) {
-      return;
-    }
-
-    let isMounted = true;
-    let unlistenBlur: (() => void) | undefined;
-    let unlistenFocus: (() => void) | undefined;
-
-    (async () => {
-      try {
-        const uBlur = await currentWindow.listen('tauri://blur', () => {
-          hideWindow();
-        });
-        if (!isMounted) {
-          uBlur();
-        } else {
-          unlistenBlur = uBlur;
-        }
-
-        const uFocus = await currentWindow.listen('tauri://focus', () => {
-          inputElement?.focus();
-          inputElement?.select();
-        });
-        if (!isMounted) {
-          uFocus();
-        } else {
-          unlistenFocus = uFocus;
-        }
-      } catch {
-        // Mode hors Tauri (tests/navigateur)
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-      if (unlistenBlur) unlistenBlur();
-      if (unlistenFocus) unlistenFocus();
-    };
   });
 </script>
 
@@ -244,16 +479,19 @@
   class:is-embedded={isEmbedded}
   onkeydown={handleKeyDown}
   role="dialog"
-  aria-label="Recherche et accès rapide"
+  aria-label="Palette d'accès rapide"
   tabindex="-1"
 >
   <div class="palette-card" class:card-embedded={isEmbedded}>
+    <!-- Barre de recherche et saisie -->
     <div class="search-bar">
       <div class="search-icon" aria-hidden="true">
         {#if isLoading}
           <div class="spinner"></div>
-        {:else if isNoteCommand}
-          <span class="command-badge">NOTE</span>
+        {:else if activeCommand}
+          <span class="command-badge">{activeCommand.cmd.slice(1).toUpperCase()}</span>
+        {:else if isMathQuery}
+          <span class="command-badge math-badge">= CALC</span>
         {:else}
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
@@ -267,27 +505,148 @@
         bind:this={inputElement}
         bind:value={query}
         type="text"
-        placeholder="Rechercher une note ou taper '/note [texte]' pour consigner..."
+        placeholder="Rechercher, taper '/' pour les commandes, ou une formule (ex: 12 * 4.5)..."
         autocomplete="off"
         spellcheck="false"
         autofocus={!isEmbedded}
       />
 
+      {#if timerActive}
+        <div class="timer-chip" title="Minuteur en cours">
+          ⏳ {Math.floor(timerSecondsLeft / 60)}:{String(timerSecondsLeft % 60).padStart(2, '0')}
+        </div>
+      {/if}
+
       {#if query}
-        <button class="clear-button" onclick={() => { query = ''; inputElement?.focus(); }} aria-label="Effacer la saisie">
+        <button class="clear-button" onclick={() => { query = ''; mathResult = null; aiOutput = null; inputElement?.focus(); }} aria-label="Effacer la saisie">
           ✕
         </button>
       {/if}
     </div>
 
-    {#if isNoteCommand}
-      <div class="quick-note-preview">
-        <span class="badge-tag">Action</span>
-        <span class="preview-text">Appuyez sur <kbd>Entrée</kbd> pour horodater dans le <strong>Journal quotidien</strong>.</span>
+    <!-- 1. Aperçu Calculatrice Inline -->
+    {#if mathResult !== null}
+      <div class="math-preview">
+        <span class="math-expr">{query.trim()}</span>
+        <span class="math-eq">=</span>
+        <strong class="math-val">{mathResult}</strong>
+        <span class="math-hint"><kbd>Entrée</kbd> pour copier</span>
       </div>
     {/if}
 
-    {#if hasResults}
+    <!-- 2. Suggestions de Commandes Slash -->
+    {#if matchingCommandSuggestions.length > 0}
+      <div class="suggestions-list" role="listbox">
+        {#each matchingCommandSuggestions as item, idx}
+          <button
+            type="button"
+            class="suggestion-item"
+            class:selected={idx === selectedIndex}
+            onclick={() => { query = item.cmd + ' '; inputElement?.focus(); }}
+          >
+            <span class="sug-icon">{item.icon}</span>
+            <strong class="sug-cmd">{item.cmd}</strong>
+            <span class="sug-label">{item.label}</span>
+            <span class="sug-desc">— {item.desc}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+
+    <!-- 3. Vue Mes Tâches (/tasks) -->
+    {#if isTasksView}
+      <div class="tasks-container">
+        <div class="sub-header">
+          <span>📋 Tâches en cours ({tasksList.filter(t => !t.checked).length})</span>
+          <span class="hint-small">Cliquer pour cocher/décocher</span>
+        </div>
+        {#if tasksList.length === 0}
+          <div class="empty-state">Aucune tâche en attente dans Inbox.md ou le Journal du jour ! 🎉</div>
+        {:else}
+          <div class="tasks-scroll">
+            {#each tasksList as task}
+              <button type="button" class="task-row" class:task-done={task.checked} onclick={() => toggleTask(task)}>
+                <input type="checkbox" checked={task.checked} readonly />
+                <span class="task-text">{task.content}</span>
+                <span class="task-file">{task.file_path.split('/').pop()}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- 4. Vue Snippets (/snip) -->
+    {#if isSnippetsView}
+      <div class="snippets-container">
+        <div class="sub-header">
+          <span>✂️ Modèles et Snippets de texte</span>
+          <span class="hint-small">Cliquer pour copier dans le presse-papier</span>
+        </div>
+        <div class="snippets-scroll">
+          {#each snippetsList as snip}
+            <button type="button" class="snip-card" onclick={() => copyToClipboard(snip.content, `Snippet "${snip.title}" copié !`)}>
+              <strong class="snip-title">{snip.title}</strong>
+              <code class="snip-preview">{snip.content.slice(0, 100)}...</code>
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- 5. Vue Bloc-Notes Brouillon (/scratch) -->
+    {#if isScratchView}
+      <div class="scratch-container">
+        <div class="sub-header">
+          <span>📄 Brouillon éphémère</span>
+          <div class="scratch-actions">
+            <button class="btn-xs" onclick={() => copyToClipboard(scratchpadText)}>Copier</button>
+            <button class="btn-xs" onclick={() => { invoke('capture_quick_note', { content: `/note ${scratchpadText}` }); notifyUser('Brouillon enregistré au Journal'); }}>Consigner au Journal</button>
+            <button class="btn-xs btn-danger" onclick={() => { scratchpadText = ''; }}>Effacer</button>
+          </div>
+        </div>
+        <textarea
+          bind:value={scratchpadText}
+          placeholder="Tapez vos notes éphémères ici (numéro, idée rapide...)..."
+          rows="6"
+        ></textarea>
+      </div>
+    {/if}
+
+    <!-- 6. Vue Historique Presse-papier (/clip) -->
+    {#if isClipView}
+      <div class="clip-container">
+        <div class="sub-header">
+          <span>📎 Historique des copies récentes</span>
+        </div>
+        {#if clipboardHistory.length === 0}
+          <div class="empty-state">L'historique se remplira au fil de vos copies.</div>
+        {:else}
+          <div class="clip-scroll">
+            {#each clipboardHistory as item}
+              <button type="button" class="clip-row" onclick={() => copyToClipboard(item)}>
+                <span class="clip-text">{item}</span>
+                <span class="clip-badge">Copier</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- 7. Réponse IA (/corrige, /ask, /tldr...) -->
+    {#if aiOutput}
+      <div class="ai-output-box">
+        <div class="ai-output-header">
+          <span>🤖 Résultat IA</span>
+          <button class="btn-xs" onclick={() => copyToClipboard(aiOutput ?? '')}>Copier</button>
+        </div>
+        <div class="ai-output-content">{aiOutput}</div>
+      </div>
+    {/if}
+
+    <!-- 8. Résultats de recherche de notes standard -->
+    {#if results.length > 0 && !activeCommand}
       <div class="results-list" role="listbox">
         {#each results as item, index}
           <button
@@ -313,19 +672,21 @@
       </div>
     {/if}
 
+    <!-- Bandeau de statut -->
     {#if statusMessage}
       <div class="status-banner">
         {statusMessage}
       </div>
     {/if}
 
+    <!-- Pied de palette -->
     <div class="palette-footer">
       <div class="shortcut-hints">
         <span><kbd>↑</kbd><kbd>↓</kbd> Naviguer</span>
-        <span><kbd>↵</kbd> {isNoteCommand ? 'Enregistrer' : 'Ouvrir'}</span>
+        <span><kbd>↵</kbd> Valider / Ouvrir</span>
         <span><kbd>Échap</kbd> {isEmbedded ? 'Effacer' : 'Fermer'}</span>
       </div>
-      <div class="brand">Jeanne Core v1</div>
+      <div class="brand">Jeanne Core — Suite de Productivité</div>
     </div>
   </div>
 </div>
@@ -355,7 +716,7 @@
   .palette-card {
     width: 100%;
     max-width: 720px;
-    background: rgba(18, 22, 31, 0.94);
+    background: rgba(18, 22, 31, 0.96);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -401,9 +762,24 @@
     color: #ffffff;
     font-size: 0.65rem;
     font-weight: 700;
-    padding: 2px 6px;
+    padding: 2px 7px;
     border-radius: 4px;
     letter-spacing: 0.05em;
+  }
+
+  .math-badge {
+    background: linear-gradient(135deg, #10b981, #059669);
+  }
+
+  .timer-chip {
+    background: rgba(245, 158, 11, 0.18);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    white-space: nowrap;
   }
 
   .spinner {
@@ -449,26 +825,296 @@
     color: #cbd5e1;
   }
 
-  .quick-note-preview {
+  /* Calculatrice Inline */
+  .math-preview {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.6rem 1rem;
-    background: rgba(99, 102, 241, 0.1);
-    border-bottom: 1px solid rgba(99, 102, 241, 0.2);
-    font-size: 0.85rem;
+    padding: 0.75rem 1.25rem;
+    background: rgba(16, 185, 129, 0.12);
+    border-bottom: 1px solid rgba(16, 185, 129, 0.25);
+    font-size: 1.05rem;
+    color: #d1fae5;
+  }
+
+  .math-eq {
+    color: #6ee7b7;
+    font-weight: 600;
+  }
+
+  .math-val {
+    font-size: 1.3rem;
+    color: #34d399;
+  }
+
+  .math-hint {
+    margin-left: auto;
+    font-size: 0.78rem;
+    color: #a7f3d0;
+  }
+
+  /* Suggestions de commandes */
+  .suggestions-list {
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 0.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .suggestion-item,
+  .task-row,
+  .snip-card,
+  .clip-row {
+    font-family: inherit;
+    border: none;
+    text-align: left;
+    width: 100%;
+    box-sizing: border-box;
+    color: inherit;
+    background: transparent;
+  }
+
+  .suggestion-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.8rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+  }
+
+  .suggestion-item:hover,
+  .suggestion-item.selected {
+    background: rgba(99, 102, 241, 0.2);
+  }
+
+  .sug-icon {
+    font-size: 1rem;
+  }
+
+  .sug-cmd {
+    color: #a5b4fc;
+    font-family: monospace;
+    font-size: 0.9rem;
+  }
+
+  .sug-label {
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: #f1f5f9;
+  }
+
+  .sug-desc {
+    color: #94a3b8;
+    font-size: 0.82rem;
+  }
+
+  /* Tâches */
+  .tasks-container,
+  .snippets-container,
+  .scratch-container,
+  .clip-container {
+    padding: 0.8rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 280px;
+  }
+
+  .sub-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-bottom: 0.25rem;
+  }
+
+  .hint-small {
+    font-size: 0.75rem;
+    color: #64748b;
+  }
+
+  .tasks-scroll,
+  .snippets-scroll,
+  .clip-scroll {
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .task-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 0.6rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.88rem;
+  }
+
+  .task-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .task-done {
+    opacity: 0.5;
+    text-decoration: line-through;
+  }
+
+  .task-text {
+    flex: 1;
+    color: #f1f5f9;
+  }
+
+  .task-file {
+    font-size: 0.72rem;
+    color: #64748b;
+    font-family: monospace;
+  }
+
+  /* Snippets */
+  .snip-card {
+    padding: 0.5rem 0.75rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .snip-card:hover {
+    background: rgba(99, 102, 241, 0.18);
+  }
+
+  .snip-title {
+    font-size: 0.88rem;
     color: #c7d2fe;
   }
 
-  .badge-tag {
-    background: #6366f1;
-    color: #fff;
-    font-size: 0.7rem;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 4px;
+  .snip-preview {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
+  /* Brouillon / Scratchpad */
+  textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #f0f6fc;
+    padding: 0.6rem;
+    font-family: inherit;
+    font-size: 0.88rem;
+    resize: none;
+    outline: none;
+  }
+
+  textarea:focus {
+    border-color: #6366f1;
+  }
+
+  .scratch-actions {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .btn-xs {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e2e8f0;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  .btn-xs:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .btn-danger {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.12);
+  }
+
+  /* Presse-papier */
+  .clip-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.45rem 0.6rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.84rem;
+  }
+
+  .clip-row:hover {
+    background: rgba(99, 102, 241, 0.18);
+  }
+
+  .clip-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #e2e8f0;
+    max-width: 85%;
+  }
+
+  .clip-badge {
+    font-size: 0.7rem;
+    color: #818cf8;
+  }
+
+  /* Sortie IA */
+  .ai-output-box {
+    padding: 0.8rem 1.1rem;
+    background: rgba(99, 102, 241, 0.12);
+    border-bottom: 1px solid rgba(99, 102, 241, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .ai-output-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #c7d2fe;
+  }
+
+  .ai-output-content {
+    font-size: 0.9rem;
+    line-height: 1.45;
+    color: #f8fafc;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .empty-state {
+    padding: 1rem;
+    text-align: center;
+    font-size: 0.85rem;
+    color: #64748b;
+  }
+
+  /* Résultats de recherche standards */
   .results-list {
     max-height: 280px;
     overflow-y: auto;
@@ -476,15 +1122,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
-  }
-
-  .results-list::-webkit-scrollbar {
-    width: 5px;
-  }
-
-  .results-list::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 3px;
   }
 
   .result-item {

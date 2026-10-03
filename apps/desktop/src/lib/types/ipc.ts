@@ -29,6 +29,20 @@ export interface LocalInferenceStats {
   memory_allocated_mb: number;
 }
 
+export interface TaskItem {
+  file_path: string;
+  line_number: number;
+  content: string;
+  checked: boolean;
+  created_at?: string;
+}
+
+export interface SnippetItem {
+  key: string;
+  title: string;
+  content: string;
+}
+
 export interface IpcCommands {
   search_notes(query: string, limit?: number): Promise<SearchResult[]>;
   capture_quick_note(content: string): Promise<string>;
@@ -39,4 +53,15 @@ export interface IpcCommands {
   unload_local_model(): Promise<void>;
   get_hardware_profile(): Promise<HardwareInfo>;
   get_local_inference_stats(): Promise<LocalInferenceStats>;
+  get_default_model_path(): Promise<string>;
+  execute_todo(content: string): Promise<string>;
+  get_vault_tasks(limit?: number): Promise<TaskItem[]>;
+  toggle_vault_task(file_path: string, line_number: number, checked: boolean): Promise<void>;
+  execute_log(content: string): Promise<string>;
+  execute_meeting(title: string): Promise<string>;
+  execute_bookmark(url: string, comment?: string): Promise<string>;
+  get_snippets(): Promise<SnippetItem[]>;
+  evaluate_math(expression: string): Promise<number>;
+  ai_process_clipboard(action: string, text: string, param?: string): Promise<string>;
+  ask_vault(question: string): Promise<string>;
 }

@@ -4,10 +4,11 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::io::AsyncWriteExt;
+use tokio_util::sync::CancellationToken;
 
 use jeanne_core::{
     HardwareInfo, IndexedChunk, LocalEngineConfig, LocalInferenceStats, LocalLlmEngine,
-    NoteFrontmatter, SearchResult, StorageManager, VaultStats, VaultWatcher,
+    NoteFrontmatter, SearchResult, SnippetItem, StorageManager, TaskItem, VaultStats, VaultWatcher,
 };
 
 /// État applicatif partagé contenant l'accès sécurisé au moteur SQLite, le chemin racine du coffre
@@ -327,6 +328,207 @@ fn get_default_model_path() -> String {
         .to_string()
 }
 
+#[tauri::command]
+async fn execute_todo(
+    state: tauri::State<'_, AppState>,
+    content: String,
+) -> Result<String, String> {
+    jeanne_core::append_todo(&state.vault_path, &content)
+}
+
+#[tauri::command]
+async fn get_vault_tasks(
+    state: tauri::State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<TaskItem>, String> {
+    let mut all_tasks = Vec::new();
+    let limit = limit.unwrap_or(50);
+
+    let inbox_path = state.vault_path.join("Inbox.md");
+    if inbox_path.exists() {
+        if let Ok(tasks) = jeanne_core::extract_tasks_from_file(&inbox_path) {
+            all_tasks.extend(tasks);
+        }
+    }
+
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let journal_today = state.vault_path.join("Journal").join(format!("{today}.md"));
+    if journal_today.exists() {
+        if let Ok(tasks) = jeanne_core::extract_tasks_from_file(&journal_today) {
+            all_tasks.extend(tasks);
+        }
+    }
+
+    all_tasks.truncate(limit);
+    Ok(all_tasks)
+}
+
+#[tauri::command]
+async fn toggle_vault_task(
+    state: tauri::State<'_, AppState>,
+    file_path: String,
+    line_number: usize,
+    checked: bool,
+) -> Result<(), String> {
+    let target = validate_and_resolve_note_path(&state.vault_path, &file_path)?;
+    jeanne_core::toggle_task_in_file(&target, line_number, checked)
+}
+
+#[tauri::command]
+async fn execute_log(state: tauri::State<'_, AppState>, content: String) -> Result<String, String> {
+    jeanne_core::append_log_entry(&state.vault_path, &content)
+}
+
+#[tauri::command]
+async fn execute_meeting(
+    state: tauri::State<'_, AppState>,
+    title: String,
+) -> Result<String, String> {
+    jeanne_core::create_meeting_note(&state.vault_path, &title)
+}
+
+#[tauri::command]
+async fn execute_bookmark(
+    state: tauri::State<'_, AppState>,
+    url: String,
+    comment: Option<String>,
+) -> Result<String, String> {
+    jeanne_core::append_bookmark(&state.vault_path, &url, comment)
+}
+
+#[tauri::command]
+fn get_snippets(state: tauri::State<'_, AppState>) -> Vec<SnippetItem> {
+    jeanne_core::load_snippets(&state.vault_path)
+}
+
+#[tauri::command]
+fn evaluate_math(expression: String) -> Result<f64, String> {
+    jeanne_core::evaluate_math_expression(&expression)
+}
+
+#[tauri::command]
+async fn ai_process_clipboard(
+    state: tauri::State<'_, AppState>,
+    action: String,
+    text: String,
+    param: Option<String>,
+) -> Result<String, String> {
+    let clean_text = text.trim();
+    if clean_text.is_empty() {
+        return Err("Le presse-papier est vide ou ne contient pas de texte".to_string());
+    }
+
+    if !state.local_engine.is_model_loaded().await {
+        return Err(
+            "Le modèle local (Qwen 3B) n'est pas chargé.\nVeuillez le charger depuis le tableau de bord pour activer les actions IA du presse-papier."
+                .to_string(),
+        );
+    }
+
+    let prompt = match action.as_str() {
+        "corrige" => format!(
+            "Tu es un relecteur professionnel. Corrige l'orthographe, la grammaire, la syntaxe et la ponctuation du texte ci-dessous. Conserve le ton et le format exacts. Renvoie UNIQUEMENT le texte corrigé, sans salutation ni explication :\n\n{clean_text}"
+        ),
+        "rephrase" => {
+            let ton = param.as_deref().unwrap_or("professionnel et fluide");
+            format!(
+                "Reformule le texte ci-dessous avec un ton {ton}. Sois clair et concis. Renvoie UNIQUEMENT le texte reformulé, sans commentaire ni salutation :\n\n{clean_text}"
+            )
+        }
+        "tldr" | "resume" => format!(
+            "Résume le texte suivant sous forme de 3 puces clés concises commençant par un tiret (-). Renvoie UNIQUEMENT les puces :\n\n{clean_text}"
+        ),
+        "trad" => {
+            let target_lang = param.as_deref().unwrap_or("français");
+            format!(
+                "Traduis fidèlement le texte suivant en {target_lang}. Renvoie UNIQUEMENT la traduction sans commentaire :\n\n{clean_text}"
+            )
+        }
+        _ => return Err(format!("Action IA inconnue : '{action}'")),
+    };
+
+    let cancel = CancellationToken::new();
+    let mut rx = state
+        .local_engine
+        .generate_stream(prompt, cancel)
+        .await
+        .map_err(|e| format!("Erreur génération IA : {e}"))?;
+
+    let mut result = String::new();
+    while let Some(token) = rx.recv().await {
+        result.push_str(&token);
+    }
+
+    Ok(result.trim().to_string())
+}
+
+#[tauri::command]
+async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Result<String, String> {
+    let clean_q = question.trim();
+    if clean_q.is_empty() {
+        return Err("La question ne peut pas être vide".to_string());
+    }
+
+    let search_results = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|e| format!("Erreur accès base de données : {e}"))?;
+        storage.search_fts(clean_q, 3).unwrap_or_default()
+    };
+
+    if search_results.is_empty() {
+        return Ok(
+            "Aucune note correspondante trouvée dans votre coffre pour répondre à cette question."
+                .to_string(),
+        );
+    }
+
+    let mut context_chunks = Vec::new();
+    for hit in &search_results {
+        context_chunks.push(format!(
+            "--- Note : {} ---\n{}",
+            hit.title,
+            hit.snippet.replace("<mark>", "").replace("</mark>", "")
+        ));
+    }
+    let context_text = context_chunks.join("\n\n");
+
+    if state.local_engine.is_model_loaded().await {
+        let prompt = format!(
+            "Tu es Jeanne, assistant de connaissances. Réponds à la question suivante en te basant STRICTEMENT sur les extraits du coffre fournis ci-dessous. Si l'information n'est pas présente, indique-le honnêtement. Cite la note source entre crochets [source: titre].\n\nExtraits du coffre :\n{context_text}\n\nQuestion : {clean_q}\n\nRéponse :"
+        );
+
+        let cancel = CancellationToken::new();
+        let mut rx = state
+            .local_engine
+            .generate_stream(prompt, cancel)
+            .await
+            .map_err(|e| format!("Erreur génération IA : {e}"))?;
+
+        let mut answer = String::new();
+        while let Some(token) = rx.recv().await {
+            answer.push_str(&token);
+        }
+        Ok(answer.trim().to_string())
+    } else {
+        let mut response = format!(
+            "🔍 **Notes correspondantes trouvées ({})** *(Modèle local déchargé)* :\n\n",
+            search_results.len()
+        );
+        for hit in search_results {
+            response.push_str(&format!(
+                "📄 **{}** (`{}`)\n> {}\n\n",
+                hit.title,
+                hit.file_path,
+                hit.snippet.replace("<mark>", "**").replace("</mark>", "**")
+            ));
+        }
+        response.push_str("💡 *Chargez le modèle local (Qwen 3B) dans l'accueil pour obtenir une réponse synthétisée par IA.*");
+        Ok(response)
+    }
+}
+
 /// Tente d'enregistrer séquentiellement une liste ordonnée de raccourcis candidats.
 /// Retourne le premier raccourci ayant réussi son enregistrement auprès du système.
 pub fn register_first_available_shortcut<F>(
@@ -386,7 +588,17 @@ pub fn run() {
             unload_local_model,
             get_hardware_profile,
             get_local_inference_stats,
-            get_default_model_path
+            get_default_model_path,
+            execute_todo,
+            get_vault_tasks,
+            toggle_vault_task,
+            execute_log,
+            execute_meeting,
+            execute_bookmark,
+            get_snippets,
+            evaluate_math,
+            ai_process_clipboard,
+            ask_vault
         ])
         .setup(|app| {
             tracing::info!("Initialisation des sous-systèmes Jeanne Desktop...");

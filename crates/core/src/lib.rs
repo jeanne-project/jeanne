@@ -5,9 +5,16 @@ pub mod local_llm;
 pub mod models;
 pub mod parser;
 pub mod pii;
+pub mod productivity;
 pub mod rag;
 pub mod storage;
 pub mod vault;
+
+pub use productivity::{
+    MathEvaluationResult, SnippetItem, TaskItem, append_bookmark, append_log_entry, append_todo,
+    create_meeting_note, evaluate_math_expression, extract_tasks_from_file, load_snippets,
+    toggle_task_in_file,
+};
 
 pub use error::{JeanneError, RagError, Result};
 pub use hardware::{HardwareInfo, detect_hardware};

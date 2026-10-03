@@ -278,10 +278,9 @@
 
 <!-- ─── Modal : Guide d'installation du modèle ─── -->
 {#if showModelSetupModal}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={() => { showModelSetupModal = false; }}>
+  <div class="modal-backdrop" onclick={() => { showModelSetupModal = false; }} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="modal-setup-title">
+    <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="modal-setup-title" tabindex="-1">
       <div class="modal-header">
         <h2 id="modal-setup-title" class="modal-title">📥 Installation du Modèle Local</h2>
         <button class="modal-close" onclick={() => { showModelSetupModal = false; }} aria-label="Fermer">✕</button>
@@ -337,10 +336,9 @@
 
 <!-- ─── Modal : Aide / Documentation utilisateur ─── -->
 {#if showHelpModal}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={() => { showHelpModal = false; }}>
+  <div class="modal-backdrop" onclick={() => { showHelpModal = false; }} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="modal modal-wide" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="modal-help-title">
+    <div class="modal modal-wide" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="modal-help-title" tabindex="-1">
       <div class="modal-header">
         <h2 id="modal-help-title" class="modal-title">📖 Guide d'utilisation de Jeanne</h2>
         <button class="modal-close" onclick={() => { showHelpModal = false; }} aria-label="Fermer">✕</button>
@@ -372,10 +370,39 @@
         </section>
 
         <section class="help-section">
-          <h3 class="help-section-title">📝 Capture de Notes Rapides</h3>
-          <p>Depuis la palette ou le tableau de bord, préfixez votre texte avec <code>/note</code> :</p>
-          <div class="code-example"><code>/note Réunion avec Alice — décision : migrer vers Rust</code></div>
-          <p>La note est horodatée automatiquement et indexée immédiatement dans votre coffre Markdown.</p>
+          <h3 class="help-section-title">🚀 Commandes Slash & Suite de Productivité</h3>
+          <p>Tapez <code>/</code> dans la palette pour ouvrir le menu d'actions rapides :</p>
+          <div class="shortcuts-table">
+            <div class="shortcut-row"><kbd>/todo [texte]</kbd><span>Ajouter une tâche à <code>Inbox.md</code></span></div>
+            <div class="shortcut-row"><kbd>/tasks</kbd><span>Lister et cocher les tâches en cours directement dans la palette</span></div>
+            <div class="shortcut-row"><kbd>/note [texte]</kbd><span>Consigner une note horodatée dans le Journal du jour</span></div>
+            <div class="shortcut-row"><kbd>/log [texte]</kbd><span>Micro-journaling horodaté (time-tracking de la journée)</span></div>
+            <div class="shortcut-row"><kbd>/meeting [titre]</kbd><span>Générer un compte-rendu de réunion structuré</span></div>
+            <div class="shortcut-row"><kbd>/bookmark [url]</kbd><span>Enregistrer un signet web dans <code>Bookmarks.md</code></span></div>
+            <div class="shortcut-row"><kbd>/snip</kbd><span>Insérer un modèle de texte réutilisable (mail pro, trame...)</span></div>
+            <div class="shortcut-row"><kbd>/timer [durée]</kbd><span>Lancer un minuteur (ex: <code>/timer 25m Pause café</code>)</span></div>
+            <div class="shortcut-row"><kbd>/clip</kbd><span>Consulter et réutiliser l'historique du presse-papier</span></div>
+            <div class="shortcut-row"><kbd>/scratch</kbd><span>Ouvrir un bloc-notes brouillon éphémère</span></div>
+          </div>
+        </section>
+
+        <section class="help-section">
+          <h3 class="help-section-title">🧮 Calculatrice Arithmétique Inline</h3>
+          <p>Tapez directement une formule dans la barre de recherche (ex: <code>12 * 4.5</code>, <code>(100 + 20) / 4</code>, <code>2^8</code>) :</p>
+          <div class="code-example"><code>145 * 1.2  →  = 174</code></div>
+          <p>Appuyez sur <kbd>Entrée</kbd> pour copier instantanément le résultat dans votre presse-papier.</p>
+        </section>
+
+        <section class="help-section">
+          <h3 class="help-section-title">🤖 Actions IA Presse-Papier & Coffre</h3>
+          <p>Utilisez l'IA locale (Qwen 3B) ou distante pour agir directement sur ce que vous venez de copier :</p>
+          <div class="shortcuts-table">
+            <div class="shortcut-row"><kbd>/corrige</kbd><span>Corrige l'orthographe et la syntaxe du texte copié</span></div>
+            <div class="shortcut-row"><kbd>/rephrase [ton]</kbd><span>Reformule le texte copié (ex: <code>/rephrase pro</code>)</span></div>
+            <div class="shortcut-row"><kbd>/tldr</kbd><span>Résume le texte copié en 3 puces synthétiques</span></div>
+            <div class="shortcut-row"><kbd>/trad [langue]</kbd><span>Traduit le texte copié sans quitter votre écran</span></div>
+            <div class="shortcut-row"><kbd>/ask [question]</kbd><span>Interroge votre coffre et synthétise la réponse (RAG)</span></div>
+          </div>
         </section>
 
         <section class="help-section">

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-execute-todo"
+description = "Enables the execute_todo command."
+commands.allow = ["execute_todo"]
+
+[[permission]]
+identifier = "deny-execute-todo"
+description = "Denies the execute_todo command."
+commands.deny = ["execute_todo"]
