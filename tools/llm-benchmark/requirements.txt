@@ -1,0 +1,4 @@
+# Le banc de test fonctionne à 100% avec la bibliothèque standard Python 3.10+ (zéro dépendance obligatoire).
+# Si vous souhaitez utiliser httpx ou rich pour des usages avancés :
+# httpx>=0.27.0
+# rich>=13.7.0

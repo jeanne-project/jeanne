@@ -1,0 +1,11 @@
+[project]
+name = "jeanne-llm-benchmark"
+version = "1.0.0"
+description = "Outil de benchmark déterministe pour évaluer l'adéquation des LLMs avec le projet Jeanne"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

@@ -20,6 +20,7 @@ export interface HardwareInfo {
   vulkan_device_name: string | null;
   vulkan_supported: boolean;
   recommended_model_loaded: boolean;
+  max_recommended_context?: number;
 }
 
 export interface LocalInferenceStats {
@@ -43,6 +44,13 @@ export interface SnippetItem {
   content: string;
 }
 
+export interface ModelRecommendedParams {
+  context_size?: number | null;
+  temperature?: number | null;
+  top_p?: number | null;
+  top_k?: number | null;
+}
+
 export interface DiscoveredModel {
   name: string;
   path: string;
@@ -51,6 +59,8 @@ export interface DiscoveredModel {
   architecture?: string;
   is_loaded: boolean;
   fits_ram: boolean;
+  context_length?: number | null;
+  recommended_params?: ModelRecommendedParams | null;
 }
 
 export interface LocalEngineConfig {
@@ -62,7 +72,10 @@ export interface LocalEngineConfig {
   gpu_layers?: number | null;
   generation_timeout_secs: number;
   temperature: number;
+  top_p?: number | null;
+  top_k?: number | null;
   max_tokens: number;
+  allow_extended_context?: boolean;
   daemon_endpoint?: string | null;
   expected_sha256?: string | null;
 }

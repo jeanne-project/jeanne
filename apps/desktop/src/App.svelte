@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import QuickAccess from './lib/components/QuickAccess.svelte';
-  import type { VaultStats, HardwareInfo, LocalInferenceStats, DiscoveredModel, LocalEngineConfig } from './lib/types/ipc';
+  import type { VaultStats, HardwareInfo, LocalInferenceStats, DiscoveredModel, LocalEngineConfig, ModelRecommendedParams } from './lib/types/ipc';
 
   let windowLabel = $state('main');
   let coreVersion = $state('Chargement...');
@@ -20,6 +20,8 @@
   let modelLoadMessage = $state('');
   let modelLoadError = $state('');
   let modelsDirCopied = $state(false);
+  let dismissedRecommendedModelPath = $state<string | null>(null);
+  let recommendedSuccessNotice = $state('');
 
   // Configuration Moteur Local & Inférence Avancée
   let engineConfig = $state<LocalEngineConfig>({
@@ -30,7 +32,10 @@
     gpu_layers: null,
     generation_timeout_secs: 10,
     temperature: 0.3,
+    top_p: 0.8,
+    top_k: 20,
     max_tokens: 1024,
+    allow_extended_context: false,
     daemon_endpoint: null,
   });
   let configSavedMessage = $state('');
@@ -45,6 +50,49 @@
 
   const isQuickAccess = $derived(windowLabel === 'quick-access');
   const loadedModel = $derived(availableModels.find((m) => m.is_loaded));
+  const activeModelForRecommendation = $derived(
+    loadedModel || (selectedModelPath ? availableModels.find((m) => m.path === selectedModelPath) : null)
+  );
+
+  function hasRecommendedDifferences(model: DiscoveredModel | null | undefined): boolean {
+    if (!model || !model.recommended_params) return false;
+    const rec = model.recommended_params;
+    if (rec.context_size && rec.context_size !== engineConfig.context_size) return true;
+    if (rec.temperature !== undefined && rec.temperature !== null && Math.abs(rec.temperature - engineConfig.temperature) > 0.01) return true;
+    if (rec.top_p !== undefined && rec.top_p !== null && Math.abs(rec.top_p - (engineConfig.top_p ?? 0.8)) > 0.01) return true;
+    if (rec.top_k !== undefined && rec.top_k !== null && rec.top_k !== (engineConfig.top_k ?? 20)) return true;
+    return false;
+  }
+
+  async function applyRecommendedParams(model: DiscoveredModel) {
+    if (!model.recommended_params) return;
+    const rec = model.recommended_params;
+    if (rec.context_size) {
+      if (rec.context_size > 4096) {
+        engineConfig.allow_extended_context = true;
+      }
+      engineConfig.context_size = rec.context_size;
+    }
+    if (rec.temperature !== undefined && rec.temperature !== null) {
+      engineConfig.temperature = rec.temperature;
+    }
+    if (rec.top_p !== undefined && rec.top_p !== null) {
+      engineConfig.top_p = rec.top_p;
+    }
+    if (rec.top_k !== undefined && rec.top_k !== null) {
+      engineConfig.top_k = rec.top_k;
+    }
+    await saveEngineConfig();
+    recommendedSuccessNotice = `Paramètres recommandés pour ${model.name} appliqués avec succès !`;
+    dismissedRecommendedModelPath = model.path;
+    setTimeout(() => {
+      recommendedSuccessNotice = '';
+    }, 4500);
+  }
+
+  function dismissRecommendedParams(model: DiscoveredModel) {
+    dismissedRecommendedModelPath = model.path;
+  }
 
   async function refreshHardware() {
     try {
@@ -83,6 +131,7 @@
       await invoke('load_local_model', { modelPath: targetPath || null });
       await refreshHardware();
       await loadModelsList();
+      dismissedRecommendedModelPath = null;
       modelLoadMessage = 'Modèle chargé avec succès en mémoire vive !';
       setTimeout(() => {
         modelLoadMessage = '';
@@ -102,6 +151,7 @@
       await invoke('unload_local_model');
       await refreshHardware();
       await loadModelsList();
+      dismissedRecommendedModelPath = null;
       modelLoadMessage = 'Modèle déchargé avec succès (< 200 Mo RAM).';
       setTimeout(() => {
         modelLoadMessage = '';
@@ -126,12 +176,29 @@
     isSavingConfig = true;
     configSavedMessage = '';
     try {
+      const isPowerfulOrExtended = Boolean(
+        engineConfig.allow_extended_context ||
+        (hardwareInfo && hardwareInfo.total_system_ram_mb > 16384)
+      );
+      const maxAllowedContext = isPowerfulOrExtended ? 32768 : 4096;
+      const requestedContext = Number(engineConfig.context_size) || 4096;
+      const boundedContext = Math.min(maxAllowedContext, Math.max(512, requestedContext));
+
       const payload: LocalEngineConfig = {
         ...engineConfig,
         generation_timeout_secs: Math.max(1, Number(engineConfig.generation_timeout_secs) || 10),
         temperature: Math.min(2.0, Math.max(0.0, Number(engineConfig.temperature) || 0.3)),
+        top_p:
+          engineConfig.top_p !== null && engineConfig.top_p !== undefined
+            ? Math.min(1.0, Math.max(0.0, Number(engineConfig.top_p)))
+            : 0.8,
+        top_k:
+          engineConfig.top_k !== null && engineConfig.top_k !== undefined
+            ? Math.max(1, Math.min(200, Number(engineConfig.top_k)))
+            : 20,
         max_tokens: Math.max(64, Number(engineConfig.max_tokens) || 1024),
-        context_size: Math.min(4096, Math.max(512, Number(engineConfig.context_size) || 4096)),
+        context_size: boundedContext,
+        allow_extended_context: Boolean(engineConfig.allow_extended_context),
         threads: engineConfig.threads ? Number(engineConfig.threads) : null,
         gpu_layers:
           engineConfig.gpu_layers !== null &&
@@ -169,7 +236,10 @@
       gpu_layers: null,
       generation_timeout_secs: 10,
       temperature: 0.3,
+      top_p: 0.8,
+      top_k: 20,
       max_tokens: 1024,
+      allow_extended_context: false,
       daemon_endpoint: null,
       expected_sha256: null,
     };
@@ -181,6 +251,7 @@
     modelLoadMessage = '';
     modelLoadError = '';
     configSavedMessage = '';
+    recommendedSuccessNotice = '';
     loadModelsList();
     loadEngineConfig();
     refreshHardware();
@@ -636,6 +707,12 @@
                         {#if model.architecture}
                           <span class="tag tag-arch">🏛️ {model.architecture}</span>
                         {/if}
+                        {#if model.context_length}
+                          <span class="tag tag-ctx">📏 {model.context_length >= 1024 ? `${Math.round(model.context_length / 1024)}K` : model.context_length} tok</span>
+                        {/if}
+                        {#if model.recommended_params}
+                          <span class="tag tag-rec" title="Paramètres recommandés disponibles">✨ Profil optimal</span>
+                        {/if}
                         {#if !model.fits_ram}
                           <span class="tag tag-warning">⚠️ &gt; 4.5 Go (Vérifier RAM)</span>
                         {:else}
@@ -673,6 +750,84 @@
             </div>
           {/if}
         </section>
+
+        <!-- Proposition interactive : Paramètres recommandés du modèle GGUF -->
+        {#if activeModelForRecommendation && activeModelForRecommendation.recommended_params && hasRecommendedDifferences(activeModelForRecommendation) && dismissedRecommendedModelPath !== activeModelForRecommendation.path}
+          <div class="recommendation-card">
+            <div class="rec-header">
+              <span class="rec-icon">💡</span>
+              <div class="rec-header-text">
+                <h4 class="rec-title">Paramètres optimaux recommandés pour {activeModelForRecommendation.name}</h4>
+                <p class="rec-subtitle">
+                  Le fichier GGUF et les spécifications officielles du modèle
+                  {#if activeModelForRecommendation.architecture}(architecture <code>{activeModelForRecommendation.architecture}</code>){/if}
+                  fournissent des paramètres recommandés différents de votre configuration actuelle :
+                </p>
+              </div>
+            </div>
+
+            <div class="rec-comparison-grid">
+              <div class="rec-comparison-item">
+                <span class="rec-comp-label">Contexte KV</span>
+                <div class="rec-comp-values">
+                  <span class="rec-val-current">Actuel : {engineConfig.context_size} tok</span>
+                  <span class="rec-arrow">➔</span>
+                  <span class="rec-val-recommended">Recommandé : {activeModelForRecommendation.recommended_params.context_size ?? 4096} tok</span>
+                </div>
+              </div>
+
+              <div class="rec-comparison-item">
+                <span class="rec-comp-label">Température</span>
+                <div class="rec-comp-values">
+                  <span class="rec-val-current">Actuel : {engineConfig.temperature}</span>
+                  <span class="rec-arrow">➔</span>
+                  <span class="rec-val-recommended">Recommandé : {activeModelForRecommendation.recommended_params.temperature ?? 0.3}</span>
+                </div>
+              </div>
+
+              <div class="rec-comparison-item">
+                <span class="rec-comp-label">Top-P</span>
+                <div class="rec-comp-values">
+                  <span class="rec-val-current">Actuel : {engineConfig.top_p ?? 0.8}</span>
+                  <span class="rec-arrow">➔</span>
+                  <span class="rec-val-recommended">Recommandé : {activeModelForRecommendation.recommended_params.top_p ?? 0.8}</span>
+                </div>
+              </div>
+
+              <div class="rec-comparison-item">
+                <span class="rec-comp-label">Top-K</span>
+                <div class="rec-comp-values">
+                  <span class="rec-val-current">Actuel : {engineConfig.top_k ?? 20}</span>
+                  <span class="rec-arrow">➔</span>
+                  <span class="rec-val-recommended">Recommandé : {activeModelForRecommendation.recommended_params.top_k ?? 20}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rec-actions">
+              <button
+                type="button"
+                class="btn-sm btn-primary rec-btn-apply"
+                onclick={() => activeModelForRecommendation && applyRecommendedParams(activeModelForRecommendation)}
+              >
+                ✓ Remplacer par les paramètres recommandés
+              </button>
+              <button
+                type="button"
+                class="btn-sm btn-secondary rec-btn-dismiss"
+                onclick={() => activeModelForRecommendation && dismissRecommendedParams(activeModelForRecommendation)}
+              >
+                Conserver mes paramètres actuels
+              </button>
+            </div>
+          </div>
+        {/if}
+
+        {#if recommendedSuccessNotice}
+          <div class="alert-box alert-success">
+            <strong>✓ Succès :</strong> {recommendedSuccessNotice}
+          </div>
+        {/if}
 
         <!-- Section 3 : Inférence Locale & Accélération Matérielle -->
         <section class="settings-section">
@@ -775,11 +930,20 @@
 
                 <div class="advanced-field">
                   <label for="adv-context" class="adv-label">Contexte KV maximal (context_size)</label>
-                  <select id="adv-context" bind:value={engineConfig.context_size} class="adv-select">
-                    <option value={2048}>2048 jetons (Très frugal)</option>
-                    <option value={4096}>4096 jetons (Recommandé &le; 4096)</option>
+                  <select id="adv-context" bind:value={engineConfig.context_size} onchange={saveEngineConfig} class="adv-select">
+                    <option value={2048}>2048 jetons (Frugal)</option>
+                    <option value={4096}>4096 jetons (Standard, recommandé &le; 16 Go)</option>
+                    <option value={8192}>8192 jetons (PC &ge; 24 Go RAM / Contexte étendu)</option>
+                    <option value={16384}>16384 jetons (PC &ge; 32 Go RAM / Contexte large)</option>
+                    <option value={32768}>32768 jetons (PC puissant / Contexte natif Qwen2.5)</option>
                   </select>
-                  <span class="adv-hint">Strictement borné à 4096 tokens max pour garantir l'empreinte mémoire &lt; 4.5 Go.</span>
+                  <span class="adv-hint">
+                    {#if engineConfig.allow_extended_context || (hardwareInfo && hardwareInfo.total_system_ram_mb > 16384)}
+                      <span class="text-success">🚀 Mode contexte étendu actif (jusqu'à 32768 tokens).</span>
+                    {:else}
+                      <span>Strictement borné à 4096 tokens max sur PC &le; 16 Go pour garantir l'empreinte mémoire &lt; 4.5 Go. Débloquez ci-dessous si souhaité.</span>
+                    {/if}
+                  </span>
                 </div>
 
                 <div class="advanced-field">
@@ -797,6 +961,36 @@
                 </div>
 
                 <div class="advanced-field">
+                  <label for="adv-top-p" class="adv-label">Filtrage Top-P (top_p)</label>
+                  <input
+                    id="adv-top-p"
+                    type="number"
+                    step="0.05"
+                    min="0.05"
+                    max="1.0"
+                    placeholder="0.8"
+                    bind:value={engineConfig.top_p}
+                    class="adv-input"
+                  />
+                  <span class="adv-hint">Nucleus sampling (0.8 = standard Qwen, 0.9 = LLaMA, 0.95 = Mistral).</span>
+                </div>
+
+                <div class="advanced-field">
+                  <label for="adv-top-k" class="adv-label">Filtrage Top-K (top_k)</label>
+                  <input
+                    id="adv-top-k"
+                    type="number"
+                    step="1"
+                    min="1"
+                    max="100"
+                    placeholder="20"
+                    bind:value={engineConfig.top_k}
+                    class="adv-input"
+                  />
+                  <span class="adv-hint">Nombre de meilleurs jetons considérés (20 = Qwen, 40 = LLaMA).</span>
+                </div>
+
+                <div class="advanced-field">
                   <label for="adv-max-tokens" class="adv-label">Jetons max par réponse (max_tokens)</label>
                   <input
                     id="adv-max-tokens"
@@ -808,6 +1002,21 @@
                     class="adv-input"
                   />
                   <span class="adv-hint">Longueur maximale de la réponse générée (défaut 1024).</span>
+                </div>
+
+                <div class="advanced-field advanced-field-full">
+                  <label class="checkbox-label" for="adv-allow-extended">
+                    <input
+                      id="adv-allow-extended"
+                      type="checkbox"
+                      bind:checked={engineConfig.allow_extended_context}
+                      onchange={saveEngineConfig}
+                    />
+                    <span>🚀 Débloquer grand contexte (&gt; 4096 jetons) pour PC puissant (&gt; 16 Go RAM / GPU)</span>
+                  </label>
+                  <span class="adv-hint">
+                    Permet d'utiliser des contextes jusqu'à 32768 tokens (Qwen2.5, etc.) pour traiter de longs documents. Attention : un contexte de 32K peut allouer 4 à 8 Go de mémoire supplémentaire pour la table KV d'attention.
+                  </span>
                 </div>
 
                 <div class="advanced-field advanced-field-full">
@@ -856,6 +1065,10 @@
             <div class="stat-card">
               <span class="stat-label">Accélération Vulkan (GPU)</span>
               <span class="stat-value">{hardwareInfo?.vulkan_supported ? (hardwareInfo.vulkan_device_name ?? 'Actif') : 'CPU seul'}</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Contexte KV Conseillé</span>
+              <span class="stat-value">{hardwareInfo?.max_recommended_context ?? 4096} tok</span>
             </div>
             <div class="stat-card">
               <span class="stat-label">Plafond Frugal Jeanne</span>
@@ -2029,6 +2242,18 @@
     color: #86efac;
   }
 
+  .tag-ctx {
+    background: rgba(168, 85, 247, 0.15);
+    color: #d8b4fe;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+  }
+
+  .tag-rec {
+    background: rgba(56, 189, 248, 0.15);
+    color: #7dd3fc;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+  }
+
   .model-path-hint {
     font-size: 0.7rem;
     color: #64748b;
@@ -2111,6 +2336,147 @@
     color: #c7d2fe;
     padding: 1px 4px;
     border-radius: 3px;
+  }
+
+  /* ─── Carte Proposition Paramètres Recommandés GGUF ─── */
+  .recommendation-card {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(56, 189, 248, 0.08) 100%);
+    border: 1px solid rgba(99, 102, 241, 0.45);
+    border-radius: 8px;
+    padding: 0.95rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .rec-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+  }
+
+  .rec-icon {
+    font-size: 1.35rem;
+    line-height: 1;
+    margin-top: 2px;
+  }
+
+  .rec-header-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+  }
+
+  .rec-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #f0f6fc;
+    margin: 0;
+  }
+
+  .rec-subtitle {
+    font-size: 0.79rem;
+    color: #94a3b8;
+    margin: 0;
+    line-height: 1.45;
+  }
+
+  .rec-subtitle code {
+    background: rgba(99, 102, 241, 0.2);
+    color: #c7d2fe;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  .rec-comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 0.55rem;
+  }
+
+  .rec-comparison-item {
+    background: rgba(13, 17, 23, 0.65);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 0.45rem 0.65rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .rec-comp-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #a5b4fc;
+  }
+
+  .rec-comp-values {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.79rem;
+  }
+
+  .rec-val-current {
+    color: #94a3b8;
+  }
+
+  .rec-arrow {
+    color: #38bdf8;
+    font-weight: 700;
+  }
+
+  .rec-val-recommended {
+    color: #86efac;
+    font-weight: 600;
+  }
+
+  .rec-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+    margin-top: 0.25rem;
+  }
+
+  .rec-btn-apply {
+    background: #238636;
+    color: #ffffff;
+  }
+
+  .rec-btn-apply:hover {
+    background: #2ea043;
+  }
+
+  .rec-btn-dismiss {
+    background: rgba(255, 255, 255, 0.06);
+    color: #cbd5e1;
+  }
+
+  .rec-btn-dismiss:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #f0f6fc;
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #f0f6fc;
+    user-select: none;
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    accent-color: #238636;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
   }
 
   /* ─── Styles Paramètres Inférence & Accélération ─── */

@@ -7,10 +7,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::local_llm::validate_gguf_header;
+use crate::local_llm::{
+    ModelRecommendedParams, get_recommended_params_for_architecture, validate_gguf_header,
+};
 
 /// Informations synthétiques sur un modèle GGUF découvert sur le disque.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DiscoveredModel {
     /// Nom du fichier (ex: "qwen2.5-3b-instruct-q4_k_m.gguf")
     pub name: String,
@@ -26,6 +28,10 @@ pub struct DiscoveredModel {
     pub is_loaded: bool,
     /// Indique si le modèle respecte le budget mémoire frugal (< 4.5 Go)
     pub fits_ram: bool,
+    /// Longueur native maximale de contexte entraîné du modèle
+    pub context_length: Option<u32>,
+    /// Hyperparamètres d'inférence recommandés pour ce modèle
+    pub recommended_params: Option<ModelRecommendedParams>,
 }
 
 /// Formate une taille en octets en chaîne lisible (Go ou Mo).
@@ -199,11 +205,23 @@ pub fn discover_models_in_dirs(
                 false
             };
 
-            // Architecture : tentative de lecture d'en-tête GGUF puis fallback nom
-            let architecture = validate_gguf_header(&path)
-                .ok()
-                .and_then(|meta| meta.architecture)
+            // Architecture et hyperparamètres recommandés depuis l'en-tête GGUF
+            let gguf_meta = validate_gguf_header(&path).ok();
+            let architecture = gguf_meta
+                .as_ref()
+                .and_then(|meta| meta.architecture.clone())
                 .or_else(|| guess_architecture_from_name(&file_name));
+
+            let context_length = gguf_meta.as_ref().and_then(|meta| meta.context_length);
+
+            let recommended_params = gguf_meta
+                .as_ref()
+                .and_then(|meta| meta.recommended_params.clone())
+                .or_else(|| {
+                    architecture
+                        .as_deref()
+                        .map(|arch| get_recommended_params_for_architecture(arch, context_length))
+                });
 
             // Budget RAM : considéré compatible si taille <= 4.5 Go (recommandation 16 Go RAM)
             const MAX_RECOMMENDED_BYTES: u64 = 4_831_838_208; // 4.5 Go
@@ -221,6 +239,8 @@ pub fn discover_models_in_dirs(
                     architecture,
                     is_loaded,
                     fits_ram,
+                    context_length,
+                    recommended_params,
                 });
             }
         }

@@ -58,6 +58,15 @@ fn default_max_tokens() -> u32 {
     1024
 }
 
+/// Paramètres d'inférence recommandés (issus des métadonnées GGUF ou des préconisations constructeur).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelRecommendedParams {
+    pub context_size: Option<u32>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<u32>,
+}
+
 /// Configuration du moteur d'inférence local.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LocalEngineConfig {
@@ -76,6 +85,12 @@ pub struct LocalEngineConfig {
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
     #[serde(default)]
+    pub top_p: Option<f32>,
+    #[serde(default)]
+    pub top_k: Option<u32>,
+    #[serde(default)]
+    pub allow_extended_context: bool,
+    #[serde(default)]
     pub daemon_endpoint: Option<String>,
     pub expected_sha256: Option<String>,
 }
@@ -92,6 +107,9 @@ impl Default for LocalEngineConfig {
             generation_timeout_secs: 10,
             temperature: 0.3,
             max_tokens: 1024,
+            top_p: Some(0.8),
+            top_k: Some(20),
+            allow_extended_context: false,
             daemon_endpoint: None,
             expected_sha256: None,
         }
@@ -99,13 +117,15 @@ impl Default for LocalEngineConfig {
 }
 
 /// Métadonnées extraites de l'en-tête binaire d'un fichier GGUF.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GgufMetadata {
     pub magic: [u8; 4],
     pub version: u32,
     pub tensor_count: u64,
     pub metadata_kv_count: u64,
     pub architecture: Option<String>,
+    pub context_length: Option<u32>,
+    pub recommended_params: Option<ModelRecommendedParams>,
 }
 
 /// Représentation interne d'un modèle chargé en mémoire.
@@ -128,14 +148,30 @@ pub struct LocalLlmEngine {
     hardware: HardwareInfo,
 }
 
+/// Calcule la taille maximale de contexte KV autorisée selon la RAM disponible et l'autorisation explicite.
+pub fn calculate_max_allowed_context(total_ram_mb: u64, allow_extended: bool) -> u32 {
+    if allow_extended || total_ram_mb > 32768 {
+        32768
+    } else if total_ram_mb > 24576 {
+        16384
+    } else if total_ram_mb > 16384 {
+        8192
+    } else {
+        4096
+    }
+}
+
 impl LocalLlmEngine {
-    /// Crée une nouvelle instance du moteur local avec contexte KV bridé à 4 096 tokens.
+    /// Crée une nouvelle instance du moteur local avec contexte KV borné selon la RAM détectée (débridable sur machine puissante).
     pub fn new(mut config: LocalEngineConfig) -> Self {
-        let clamped_context = config.context_size.min(4096);
+        let hardware = detect_hardware();
+        let max_context = calculate_max_allowed_context(
+            hardware.total_system_ram_mb,
+            config.allow_extended_context,
+        );
+        let clamped_context = config.context_size.min(max_context);
         config.context_size = clamped_context;
         config.use_vulkan = config.use_gpu;
-
-        let hardware = detect_hardware();
 
         Self {
             config: Arc::new(Mutex::new(config)),
@@ -155,18 +191,25 @@ impl LocalLlmEngine {
 
     /// Met à jour la configuration du moteur local (GPU, threads, timeout, température, etc.).
     pub async fn update_config(&self, mut new_config: LocalEngineConfig) {
-        let clamped_context = new_config.context_size.min(4096);
+        let max_context = calculate_max_allowed_context(
+            self.hardware.total_system_ram_mb,
+            new_config.allow_extended_context,
+        );
+        let clamped_context = new_config.context_size.min(max_context);
         new_config.context_size = clamped_context;
         new_config.use_vulkan = new_config.use_gpu;
 
         tracing::info!(
-            "[LocalLLM] Mise à jour configuration : use_gpu={}, gpu_layers={:?}, threads={:?}, timeout={}s, temp={}, ctx={}",
+            "[LocalLLM] Mise à jour configuration : use_gpu={}, gpu_layers={:?}, threads={:?}, timeout={}s, temp={}, top_p={:?}, top_k={:?}, ctx={} (max_allowed={})",
             new_config.use_gpu,
             new_config.gpu_layers,
             new_config.threads,
             new_config.generation_timeout_secs,
             new_config.temperature,
-            new_config.context_size
+            new_config.top_p,
+            new_config.top_k,
+            new_config.context_size,
+            max_context
         );
 
         let mut conf = self.config.lock().await;
@@ -527,7 +570,8 @@ pub fn resolve_default_model_dir() -> PathBuf {
     p
 }
 
-/// Valide l'en-tête binaire d'un fichier GGUF selon les spécifications GGML/GGUF v2/v3.
+/// Valide l'en-tête binaire d'un fichier GGUF selon les spécifications GGML/GGUF v2/v3
+/// et extrait les métadonnées de contexte et d'échantillonnage recommandées.
 pub fn validate_gguf_header(path: &Path) -> Result<GgufMetadata, LlmError> {
     let file = File::open(path).map_err(|e| {
         LlmError::LocalEngine(format!("Failed to open model file {}: {e}", path.display()))
@@ -570,13 +614,260 @@ pub fn validate_gguf_header(path: &Path) -> Result<GgufMetadata, LlmError> {
         .map_err(|e| LlmError::ModelIntegrity(format!("Failed to read metadata KV count: {e}")))?;
     let metadata_kv_count = u64::from_le_bytes(kv_count_bytes);
 
+    // Extraction des clés-valeurs réelles de métadonnées GGUF
+    let (architecture, context_length, mut recommended) =
+        extract_gguf_kv_metadata(&mut reader, version, metadata_kv_count);
+
+    let arch_name = architecture.as_deref().unwrap_or("qwen2");
+    let official_params = get_recommended_params_for_architecture(arch_name, context_length);
+
+    let final_recommended = match recommended.take() {
+        Some(mut rec) => {
+            if rec.context_size.is_none() {
+                rec.context_size = official_params.context_size;
+            }
+            if rec.temperature.is_none() {
+                rec.temperature = official_params.temperature;
+            }
+            if rec.top_p.is_none() {
+                rec.top_p = official_params.top_p;
+            }
+            if rec.top_k.is_none() {
+                rec.top_k = official_params.top_k;
+            }
+            Some(rec)
+        }
+        None => Some(official_params),
+    };
+
     Ok(GgufMetadata {
         magic,
         version,
         tensor_count,
         metadata_kv_count,
-        architecture: Some("qwen2".to_string()),
+        architecture: architecture.or_else(|| Some("qwen2".to_string())),
+        context_length,
+        recommended_params: final_recommended,
     })
+}
+
+/// Parse de façon résiliente et sans panique les paires clé-valeur de métadonnées GGUF.
+fn extract_gguf_kv_metadata(
+    reader: &mut BufReader<File>,
+    _version: u32,
+    metadata_kv_count: u64,
+) -> (Option<String>, Option<u32>, Option<ModelRecommendedParams>) {
+    let mut arch: Option<String> = None;
+    let mut context_len: Option<u32> = None;
+    let mut temp: Option<f32> = None;
+    let mut top_p: Option<f32> = None;
+    let mut top_k: Option<u32> = None;
+
+    let max_kvs = metadata_kv_count.min(500);
+
+    for _ in 0..max_kvs {
+        let mut key_len_bytes = [0u8; 8];
+        if reader.read_exact(&mut key_len_bytes).is_err() {
+            break;
+        }
+        let key_len = u64::from_le_bytes(key_len_bytes);
+        if key_len == 0 || key_len > 256 {
+            break;
+        }
+
+        let mut key_bytes = vec![0u8; key_len as usize];
+        if reader.read_exact(&mut key_bytes).is_err() {
+            break;
+        }
+        let key = String::from_utf8_lossy(&key_bytes).to_string();
+
+        let mut val_type_bytes = [0u8; 4];
+        if reader.read_exact(&mut val_type_bytes).is_err() {
+            break;
+        }
+        let val_type = u32::from_le_bytes(val_type_bytes);
+
+        match val_type {
+            0 | 1 | 7 => {
+                let mut b = [0u8; 1];
+                if reader.read_exact(&mut b).is_err() {
+                    break;
+                }
+            }
+            2 | 3 => {
+                let mut b = [0u8; 2];
+                if reader.read_exact(&mut b).is_err() {
+                    break;
+                }
+            }
+            4..=6 => {
+                let mut b = [0u8; 4];
+                if reader.read_exact(&mut b).is_err() {
+                    break;
+                }
+                if (key.ends_with(".context_length") || key == "context_length") && val_type == 4 {
+                    context_len = Some(u32::from_le_bytes(b));
+                } else if (key.contains("temp") || key == "temperature") && val_type == 6 {
+                    temp = Some(f32::from_le_bytes(b));
+                } else if (key.contains("top_p") || key == "top_p") && val_type == 6 {
+                    top_p = Some(f32::from_le_bytes(b));
+                } else if (key.contains("top_k") || key == "top_k") && val_type == 4 {
+                    top_k = Some(u32::from_le_bytes(b));
+                }
+            }
+            10..=12 => {
+                let mut b = [0u8; 8];
+                if reader.read_exact(&mut b).is_err() {
+                    break;
+                }
+                if (key.ends_with(".context_length") || key == "context_length") && val_type == 10 {
+                    context_len = Some(u64::from_le_bytes(b) as u32);
+                }
+            }
+            8 => {
+                let mut str_len_bytes = [0u8; 8];
+                if reader.read_exact(&mut str_len_bytes).is_err() {
+                    break;
+                }
+                let str_len = u64::from_le_bytes(str_len_bytes);
+                if str_len > 4096 {
+                    break;
+                }
+                let mut str_bytes = vec![0u8; str_len as usize];
+                if reader.read_exact(&mut str_bytes).is_err() {
+                    break;
+                }
+                if key == "general.architecture" {
+                    arch = Some(String::from_utf8_lossy(&str_bytes).to_string());
+                }
+            }
+            9 => {
+                let mut elem_type_bytes = [0u8; 4];
+                let mut elem_count_bytes = [0u8; 8];
+                if reader.read_exact(&mut elem_type_bytes).is_err()
+                    || reader.read_exact(&mut elem_count_bytes).is_err()
+                {
+                    break;
+                }
+                let elem_type = u32::from_le_bytes(elem_type_bytes);
+                let elem_count = u64::from_le_bytes(elem_count_bytes);
+
+                if elem_count > 10_000 {
+                    break;
+                }
+
+                let elem_size = match elem_type {
+                    0 | 1 | 7 => Some(1),
+                    2 | 3 => Some(2),
+                    4..=6 => Some(4),
+                    10..=12 => Some(8),
+                    _ => None,
+                };
+
+                if let Some(size) = elem_size {
+                    let total_bytes = elem_count * size;
+                    if total_bytes > 500_000 {
+                        break;
+                    }
+                    let mut dummy = vec![0u8; total_bytes as usize];
+                    if reader.read_exact(&mut dummy).is_err() {
+                        break;
+                    }
+                } else if elem_type == 8 {
+                    let mut ok = true;
+                    for _ in 0..elem_count {
+                        let mut s_len_b = [0u8; 8];
+                        if reader.read_exact(&mut s_len_b).is_err() {
+                            ok = false;
+                            break;
+                        }
+                        let s_len = u64::from_le_bytes(s_len_b);
+                        if s_len > 4096 {
+                            ok = false;
+                            break;
+                        }
+                        let mut s_buf = vec![0u8; s_len as usize];
+                        if reader.read_exact(&mut s_buf).is_err() {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if !ok {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            _ => {
+                break;
+            }
+        }
+    }
+
+    let rec = if temp.is_some() || top_p.is_some() || top_k.is_some() || context_len.is_some() {
+        Some(ModelRecommendedParams {
+            context_size: context_len,
+            temperature: temp,
+            top_p,
+            top_k,
+        })
+    } else {
+        None
+    };
+
+    (arch, context_len, rec)
+}
+
+/// Fournit les hyperparamètres recommandés officiels pour une architecture de modèle.
+pub fn get_recommended_params_for_architecture(
+    arch: &str,
+    gguf_context_length: Option<u32>,
+) -> ModelRecommendedParams {
+    let lower = arch.to_lowercase();
+    if lower.contains("qwen") {
+        ModelRecommendedParams {
+            context_size: gguf_context_length.or(Some(32768)),
+            temperature: Some(0.7),
+            top_p: Some(0.8),
+            top_k: Some(20),
+        }
+    } else if lower.contains("llama") {
+        ModelRecommendedParams {
+            context_size: gguf_context_length.or(Some(8192)),
+            temperature: Some(0.6),
+            top_p: Some(0.9),
+            top_k: Some(40),
+        }
+    } else if lower.contains("mistral") {
+        ModelRecommendedParams {
+            context_size: gguf_context_length.or(Some(32768)),
+            temperature: Some(0.7),
+            top_p: Some(0.95),
+            top_k: Some(40),
+        }
+    } else if lower.contains("phi") {
+        ModelRecommendedParams {
+            context_size: gguf_context_length.or(Some(4096)),
+            temperature: Some(0.3),
+            top_p: Some(0.95),
+            top_k: Some(50),
+        }
+    } else if lower.contains("gemma") {
+        ModelRecommendedParams {
+            context_size: gguf_context_length.or(Some(8192)),
+            temperature: Some(0.6),
+            top_p: Some(0.9),
+            top_k: Some(40),
+        }
+    } else {
+        ModelRecommendedParams {
+            context_size: gguf_context_length.or(Some(4096)),
+            temperature: Some(0.3),
+            top_p: Some(0.8),
+            top_k: Some(40),
+        }
+    }
 }
 
 /// Calcule et vérifie l'empreinte SHA-256 d'un fichier de modèle par streaming par blocs de 64 Ko.
@@ -724,7 +1015,7 @@ async fn try_stream_from_local_daemon(
         }
 
         let url = format!("{base_url}/chat/completions");
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "model": "qwen2.5:3b",
             "messages": [
                 {"role": "user", "content": prompt}
@@ -737,6 +1028,19 @@ async fn try_stream_from_local_daemon(
                 "num_thread": config.threads
             }
         });
+
+        if let Some(top_p) = config.top_p {
+            payload["top_p"] = serde_json::json!(top_p);
+            if let Some(opts) = payload.get_mut("options") {
+                opts["top_p"] = serde_json::json!(top_p);
+            }
+        }
+        if let Some(top_k) = config.top_k {
+            payload["top_k"] = serde_json::json!(top_k);
+            if let Some(opts) = payload.get_mut("options") {
+                opts["top_k"] = serde_json::json!(top_k);
+            }
+        }
 
         if let Ok(resp) = client.post(&url).json(&payload).send().await {
             if resp.status().is_success() {

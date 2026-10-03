@@ -26,3 +26,11 @@ coverage/
 *.profraw
 *.profdata
 .agents/
+
+# Python / Benchmark Tool
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+tools/llm-benchmark/reports/
+

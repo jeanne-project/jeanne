@@ -7,6 +7,10 @@ use std::fs;
 use std::path::Path;
 
 /// Informations matérielles et capacités d'accélération de la machine hôte.
+fn default_max_context() -> u32 {
+    4096
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HardwareInfo {
     pub total_system_ram_mb: u64,
@@ -14,6 +18,8 @@ pub struct HardwareInfo {
     pub vulkan_device_name: Option<String>,
     pub vulkan_supported: bool,
     pub recommended_model_loaded: bool,
+    #[serde(default = "default_max_context")]
+    pub max_recommended_context: u32,
 }
 
 impl Default for HardwareInfo {
@@ -24,6 +30,7 @@ impl Default for HardwareInfo {
             vulkan_device_name: None,
             vulkan_supported: false,
             recommended_model_loaded: false,
+            max_recommended_context: 4096,
         }
     }
 }
@@ -33,12 +40,23 @@ pub fn detect_hardware() -> HardwareInfo {
     let (total_ram, available_ram) = detect_system_ram();
     let (vulkan_supported, vulkan_device) = detect_vulkan();
 
+    let max_recommended_context = if total_ram > 32768 {
+        32768
+    } else if total_ram > 24576 {
+        16384
+    } else if total_ram > 16384 {
+        8192
+    } else {
+        4096
+    };
+
     HardwareInfo {
         total_system_ram_mb: total_ram,
         available_ram_mb: available_ram,
         vulkan_device_name: vulkan_device,
         vulkan_supported,
         recommended_model_loaded: false,
+        max_recommended_context,
     }
 }
 

@@ -12,9 +12,10 @@ use futures_util::StreamExt;
 use jeanne_core::hardware::detect_hardware;
 use jeanne_core::llm::{ChatMessage, LlmError, LlmProvider};
 use jeanne_core::local_llm::{
-    LocalEngineConfig, LocalLlmEngine, compress_local_prompt, correct_french_and_english,
-    rephrase_text, resolve_default_model_dir, summarize_in_bullets, synthesize_local_response,
-    translate_text, validate_gguf_header, verify_model_sha256,
+    LocalEngineConfig, LocalLlmEngine, calculate_max_allowed_context, compress_local_prompt,
+    correct_french_and_english, get_recommended_params_for_architecture, rephrase_text,
+    resolve_default_model_dir, summarize_in_bullets, synthesize_local_response, translate_text,
+    validate_gguf_header, verify_model_sha256,
 };
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -606,6 +607,7 @@ async fn test_04_19_config_update_and_gpu_toggle() {
         max_tokens: 512,
         daemon_endpoint: Some("http://localhost:5000/v1".to_string()),
         expected_sha256: None,
+        ..Default::default()
     };
 
     engine.update_config(updated.clone()).await;
@@ -622,4 +624,64 @@ async fn test_04_19_config_update_and_gpu_toggle() {
         fetched.daemon_endpoint.as_deref(),
         Some("http://localhost:5000/v1")
     );
+}
+
+#[tokio::test]
+async fn test_04_20_extended_kv_context_on_capable_hardware() {
+    // 1. Calcul du contexte max selon le dimensionnement RAM
+    assert_eq!(calculate_max_allowed_context(8192, false), 4096);
+    assert_eq!(calculate_max_allowed_context(16384, false), 4096);
+    assert_eq!(calculate_max_allowed_context(24576, false), 8192);
+    assert_eq!(calculate_max_allowed_context(32768, false), 16384);
+    assert_eq!(calculate_max_allowed_context(65536, false), 32768);
+
+    // 2. Débridage explicite (allow_extended_context = true)
+    assert_eq!(calculate_max_allowed_context(16384, true), 32768);
+
+    // 3. Test sur LocalLlmEngine avec allow_extended_context: true
+    let config = LocalEngineConfig {
+        model_path: None,
+        context_size: 16384,
+        allow_extended_context: true,
+        ..Default::default()
+    };
+    let engine = LocalLlmEngine::new(config);
+    assert_eq!(engine.context_size(), 16384);
+
+    // 4. Mise à jour de config vers 32768
+    let mut updated = engine.get_config().await;
+    updated.context_size = 32768;
+    updated.allow_extended_context = true;
+    engine.update_config(updated).await;
+    let fetched = engine.get_config().await;
+    assert_eq!(fetched.context_size, 32768);
+}
+
+#[test]
+fn test_04_21_gguf_recommended_parameters_extraction() {
+    // Test des préconisations constructeurs par architecture
+    let qwen_rec = get_recommended_params_for_architecture("qwen2", Some(32768));
+    assert_eq!(qwen_rec.context_size, Some(32768));
+    assert_eq!(qwen_rec.temperature, Some(0.7));
+    assert_eq!(qwen_rec.top_p, Some(0.8));
+    assert_eq!(qwen_rec.top_k, Some(20));
+
+    let llama_rec = get_recommended_params_for_architecture("llama", Some(131072));
+    assert_eq!(llama_rec.context_size, Some(131072));
+    assert_eq!(llama_rec.temperature, Some(0.6));
+    assert_eq!(llama_rec.top_p, Some(0.9));
+    assert_eq!(llama_rec.top_k, Some(40));
+
+    let mistral_rec = get_recommended_params_for_architecture("mistral", None);
+    assert_eq!(mistral_rec.context_size, Some(32768));
+    assert_eq!(mistral_rec.temperature, Some(0.7));
+    assert_eq!(mistral_rec.top_p, Some(0.95));
+
+    // Test de validation d'en-tête GGUF avec assignation de paramètres recommandés
+    let (valid_file, _) = create_synthetic_gguf_file(512);
+    let meta = validate_gguf_header(valid_file.path()).expect("Valid header must parse");
+    assert!(meta.recommended_params.is_some());
+    let rec = meta.recommended_params.unwrap();
+    assert!(rec.temperature.is_some());
+    assert!(rec.context_size.is_some());
 }
