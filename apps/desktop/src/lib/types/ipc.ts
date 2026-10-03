@@ -53,6 +53,20 @@ export interface DiscoveredModel {
   fits_ram: boolean;
 }
 
+export interface LocalEngineConfig {
+  model_path?: string | null;
+  context_size: number;
+  threads?: number | null;
+  use_vulkan: boolean;
+  use_gpu: boolean;
+  gpu_layers?: number | null;
+  generation_timeout_secs: number;
+  temperature: number;
+  max_tokens: number;
+  daemon_endpoint?: string | null;
+  expected_sha256?: string | null;
+}
+
 export interface IpcCommands {
   search_notes(query: string, limit?: number): Promise<SearchResult[]>;
   capture_quick_note(content: string): Promise<string>;
@@ -66,6 +80,8 @@ export interface IpcCommands {
   get_default_model_path(): Promise<string>;
   get_models_directory(): Promise<string>;
   list_available_models(): Promise<DiscoveredModel[]>;
+  get_local_engine_config(): Promise<LocalEngineConfig>;
+  update_local_engine_config(config: LocalEngineConfig): Promise<LocalEngineConfig>;
   execute_todo(content: string): Promise<string>;
   get_vault_tasks(limit?: number): Promise<TaskItem[]>;
   toggle_vault_task(file_path: string, line_number: number, checked: boolean): Promise<void>;

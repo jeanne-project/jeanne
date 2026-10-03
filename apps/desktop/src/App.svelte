@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import QuickAccess from './lib/components/QuickAccess.svelte';
-  import type { VaultStats, HardwareInfo, LocalInferenceStats, DiscoveredModel } from './lib/types/ipc';
+  import type { VaultStats, HardwareInfo, LocalInferenceStats, DiscoveredModel, LocalEngineConfig } from './lib/types/ipc';
 
   let windowLabel = $state('main');
   let coreVersion = $state('Chargement...');
@@ -20,6 +20,21 @@
   let modelLoadMessage = $state('');
   let modelLoadError = $state('');
   let modelsDirCopied = $state(false);
+
+  // Configuration Moteur Local & Inférence Avancée
+  let engineConfig = $state<LocalEngineConfig>({
+    context_size: 4096,
+    threads: null,
+    use_vulkan: true,
+    use_gpu: true,
+    gpu_layers: null,
+    generation_timeout_secs: 10,
+    temperature: 0.3,
+    max_tokens: 1024,
+    daemon_endpoint: null,
+  });
+  let configSavedMessage = $state('');
+  let isSavingConfig = $state(false);
 
   // Modals Aide & Setup
   let showHelpModal = $state(false);
@@ -98,11 +113,76 @@
     }
   }
 
+  async function loadEngineConfig() {
+    try {
+      const cfg = await invoke<LocalEngineConfig>('get_local_engine_config');
+      engineConfig = cfg;
+    } catch (e) {
+      console.error('Erreur chargement config moteur', e);
+    }
+  }
+
+  async function saveEngineConfig() {
+    isSavingConfig = true;
+    configSavedMessage = '';
+    try {
+      const payload: LocalEngineConfig = {
+        ...engineConfig,
+        generation_timeout_secs: Math.max(1, Number(engineConfig.generation_timeout_secs) || 10),
+        temperature: Math.min(2.0, Math.max(0.0, Number(engineConfig.temperature) || 0.3)),
+        max_tokens: Math.max(64, Number(engineConfig.max_tokens) || 1024),
+        context_size: Math.min(4096, Math.max(512, Number(engineConfig.context_size) || 4096)),
+        threads: engineConfig.threads ? Number(engineConfig.threads) : null,
+        gpu_layers:
+          engineConfig.gpu_layers !== null &&
+          engineConfig.gpu_layers !== undefined &&
+          String(engineConfig.gpu_layers) !== ''
+            ? Number(engineConfig.gpu_layers)
+            : null,
+        daemon_endpoint:
+          engineConfig.daemon_endpoint && engineConfig.daemon_endpoint.trim() !== ''
+            ? engineConfig.daemon_endpoint.trim()
+            : null,
+      };
+      const updated = await invoke<LocalEngineConfig>('update_local_engine_config', { config: payload });
+      engineConfig = updated;
+      configSavedMessage = 'Paramètres d’inférence enregistrés avec succès !';
+      await refreshHardware();
+      setTimeout(() => {
+        configSavedMessage = '';
+      }, 3500);
+    } catch (e) {
+      console.error('Erreur sauvegarde config', e);
+      modelLoadError = `Erreur enregistrement : ${String(e)}`;
+    } finally {
+      isSavingConfig = false;
+    }
+  }
+
+  function resetEngineConfig() {
+    engineConfig = {
+      model_path: null,
+      context_size: 4096,
+      threads: null,
+      use_vulkan: true,
+      use_gpu: true,
+      gpu_layers: null,
+      generation_timeout_secs: 10,
+      temperature: 0.3,
+      max_tokens: 1024,
+      daemon_endpoint: null,
+      expected_sha256: null,
+    };
+    saveEngineConfig();
+  }
+
   function openSettings() {
     showSettingsModal = true;
     modelLoadMessage = '';
     modelLoadError = '';
+    configSavedMessage = '';
     loadModelsList();
+    loadEngineConfig();
     refreshHardware();
   }
 
@@ -197,6 +277,7 @@
 
       refreshHardware();
       loadModelsList();
+      loadEngineConfig();
     }
   });
 
@@ -593,7 +674,178 @@
           {/if}
         </section>
 
-        <!-- Section 3 : Diagnostic Matériel & Conseils RAM -->
+        <!-- Section 3 : Inférence Locale & Accélération Matérielle -->
+        <section class="settings-section">
+          <div class="section-title-bar">
+            <h3 class="settings-subtitle">⚡ Inférence Locale & Accélération Matérielle</h3>
+            {#if configSavedMessage}
+              <span class="save-toast">✓ {configSavedMessage}</span>
+            {/if}
+          </div>
+
+          <div class="settings-grid">
+            <!-- Option 1 : GPU Toggle -->
+            <div class="setting-card">
+              <div class="setting-header">
+                <div class="setting-title-group">
+                  <span class="setting-icon">🎮</span>
+                  <label for="gpu-toggle" class="setting-label">Accélération Matérielle GPU (Vulkan / DirectML)</label>
+                </div>
+                <label class="toggle-switch" title="Activer / Désactiver l'utilisation de la carte graphique">
+                  <input
+                    id="gpu-toggle"
+                    type="checkbox"
+                    bind:checked={engineConfig.use_gpu}
+                    onchange={saveEngineConfig}
+                  />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <p class="setting-desc">
+                {#if engineConfig.use_gpu}
+                  <strong class="text-success">Actif :</strong> Les calculs sont déchargés sur votre carte graphique ou iGPU partagé pour une vitesse maximale.
+                {:else}
+                  <strong class="text-warning">Désactivé (Mode CPU forcé) :</strong> Les calculs s'exécutent sur le processeur (RAM système), préservant toute la VRAM pour vos autres applications.
+                {/if}
+              </p>
+            </div>
+
+            <!-- Option 2 : Timeout de génération -->
+            <div class="setting-card">
+              <div class="setting-header">
+                <div class="setting-title-group">
+                  <span class="setting-icon">⏱️</span>
+                  <label for="timeout-input" class="setting-label">Délai limite de génération (Timeout)</label>
+                </div>
+                <div class="input-with-unit">
+                  <input
+                    id="timeout-input"
+                    type="number"
+                    min="1"
+                    max="180"
+                    bind:value={engineConfig.generation_timeout_secs}
+                    onchange={saveEngineConfig}
+                    class="input-number"
+                  />
+                  <span class="unit-label">sec</span>
+                </div>
+              </div>
+              <p class="setting-desc">
+                Interrompt automatiquement la génération si le modèle boucle ou tarde à répondre pour protéger les ressources de votre machine (<strong>10 secondes</strong> par défaut).
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section 4 : Paramètres Avancés d'Inférence (Repliable) -->
+        <section class="settings-section">
+          <details class="advanced-accordion">
+            <summary class="advanced-summary">
+              <span>🔧 Paramètres Avancés d'Inférence (Couches GPU, Threads, Contexte, Température...)</span>
+            </summary>
+            <div class="advanced-content">
+              <div class="advanced-grid">
+                <div class="advanced-field">
+                  <label for="adv-gpu-layers" class="adv-label">Couches GPU offload (gpu_layers)</label>
+                  <input
+                    id="adv-gpu-layers"
+                    type="number"
+                    min="0"
+                    max="99"
+                    placeholder="Auto (99 couches)"
+                    bind:value={engineConfig.gpu_layers}
+                    class="adv-input"
+                  />
+                  <span class="adv-hint">Laisser vide pour tout décharger, ou indiquer le nombre exact de couches.</span>
+                </div>
+
+                <div class="advanced-field">
+                  <label for="adv-threads" class="adv-label">Cœurs CPU alloués (threads)</label>
+                  <input
+                    id="adv-threads"
+                    type="number"
+                    min="1"
+                    max="64"
+                    placeholder="Auto (cœurs physiques)"
+                    bind:value={engineConfig.threads}
+                    class="adv-input"
+                  />
+                  <span class="adv-hint">Nombre de threads de calcul CPU (laisser vide pour détection automatique).</span>
+                </div>
+
+                <div class="advanced-field">
+                  <label for="adv-context" class="adv-label">Contexte KV maximal (context_size)</label>
+                  <select id="adv-context" bind:value={engineConfig.context_size} class="adv-select">
+                    <option value={2048}>2048 jetons (Très frugal)</option>
+                    <option value={4096}>4096 jetons (Recommandé &le; 4096)</option>
+                  </select>
+                  <span class="adv-hint">Strictement borné à 4096 tokens max pour garantir l'empreinte mémoire &lt; 4.5 Go.</span>
+                </div>
+
+                <div class="advanced-field">
+                  <label for="adv-temp" class="adv-label">Température de créativité (temperature)</label>
+                  <input
+                    id="adv-temp"
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="1.5"
+                    bind:value={engineConfig.temperature}
+                    class="adv-input"
+                  />
+                  <span class="adv-hint">0.0 = Déterministe/relecture, 0.3 = Idéal assistant Jeanne, 0.8+ = Créatif.</span>
+                </div>
+
+                <div class="advanced-field">
+                  <label for="adv-max-tokens" class="adv-label">Jetons max par réponse (max_tokens)</label>
+                  <input
+                    id="adv-max-tokens"
+                    type="number"
+                    step="64"
+                    min="64"
+                    max="4096"
+                    bind:value={engineConfig.max_tokens}
+                    class="adv-input"
+                  />
+                  <span class="adv-hint">Longueur maximale de la réponse générée (défaut 1024).</span>
+                </div>
+
+                <div class="advanced-field advanced-field-full">
+                  <label for="adv-daemon" class="adv-label">Serveur d'inférence local personnalisé (daemon_endpoint)</label>
+                  <input
+                    id="adv-daemon"
+                    type="text"
+                    placeholder="ex: http://127.0.0.1:11434/v1 (Ollama) ou http://127.0.0.1:8080/v1"
+                    bind:value={engineConfig.daemon_endpoint}
+                    class="adv-input"
+                  />
+                  <span class="adv-hint">Optionnel : Si vous utilisez déjà Ollama, LM Studio ou llama-server sur votre machine.</span>
+                </div>
+              </div>
+
+              <div class="advanced-actions">
+                <button
+                  type="button"
+                  class="btn-sm btn-primary"
+                  onclick={saveEngineConfig}
+                  disabled={isSavingConfig}
+                >
+                  {isSavingConfig ? 'Enregistrement...' : '💾 Enregistrer les paramètres'}
+                </button>
+                <button
+                  type="button"
+                  class="btn-sm btn-secondary"
+                  onclick={resetEngineConfig}
+                  disabled={isSavingConfig}
+                >
+                  ↺ Rétablir les valeurs par défaut
+                </button>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <!-- Section 5 : Diagnostic Matériel & Conseils RAM -->
         <section class="settings-section hardware-advice">
           <h3 class="settings-subtitle">⚙️ Diagnostic Matériel & Conseils de Puissance</h3>
           <div class="stats-cards">
@@ -1859,5 +2111,256 @@
     color: #c7d2fe;
     padding: 1px 4px;
     border-radius: 3px;
+  }
+
+  /* ─── Styles Paramètres Inférence & Accélération ─── */
+  .save-toast {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: #86efac;
+    background: rgba(34, 197, 94, 0.15);
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    padding: 3px 8px;
+    border-radius: 6px;
+  }
+
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 0.85rem;
+  }
+
+  .setting-card {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    transition: border-color 0.15s ease;
+  }
+
+  .setting-card:hover {
+    border-color: #484f58;
+  }
+
+  .setting-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .setting-title-group {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  .setting-icon {
+    font-size: 1.1rem;
+  }
+
+  .setting-label {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: #f0f6fc;
+    cursor: pointer;
+  }
+
+  .setting-desc {
+    font-size: 0.8rem;
+    color: #8b949e;
+    margin: 0;
+    line-height: 1.4;
+  }
+
+  .text-success {
+    color: #86efac;
+  }
+
+  .text-warning {
+    color: #facc15;
+  }
+
+  /* Toggle Switch */
+  .toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #30363d;
+    transition: 0.2s;
+    border-radius: 24px;
+    border: 1px solid #484f58;
+  }
+
+  .toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: #c9d1d9;
+    transition: 0.2s;
+    border-radius: 50%;
+  }
+
+  .toggle-switch input:checked + .toggle-slider {
+    background-color: #238636;
+    border-color: #2ea043;
+  }
+
+  .toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(20px);
+    background-color: #ffffff;
+  }
+
+  /* Input with unit */
+  .input-with-unit {
+    display: inline-flex;
+    align-items: center;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 0 0.5rem;
+    gap: 0.25rem;
+  }
+
+  .input-with-unit:focus-within {
+    border-color: #58a6ff;
+  }
+
+  .input-number {
+    background: transparent;
+    border: none;
+    color: #f0f6fc;
+    font-family: inherit;
+    font-size: 0.86rem;
+    font-weight: 600;
+    width: 52px;
+    padding: 0.35rem 0;
+    text-align: right;
+    outline: none;
+  }
+
+  .unit-label {
+    font-size: 0.78rem;
+    color: #8b949e;
+    user-select: none;
+  }
+
+  /* Accordion Paramètres Avancés */
+  .advanced-accordion {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .advanced-summary {
+    padding: 0.75rem 1rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #c9d1d9;
+    cursor: pointer;
+    user-select: none;
+    background: rgba(255, 255, 255, 0.02);
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+
+  .advanced-summary:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #f0f6fc;
+  }
+
+  .advanced-content {
+    padding: 1rem;
+    border-top: 1px solid #21262d;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .advanced-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 0.85rem;
+  }
+
+  .advanced-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .advanced-field-full {
+    grid-column: 1 / -1;
+  }
+
+  .adv-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #c9d1d9;
+  }
+
+  .adv-input, .adv-select {
+    background: #161b22;
+    border: 1px solid #30363d;
+    color: #f0f6fc;
+    font-family: inherit;
+    font-size: 0.82rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 6px;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+
+  .adv-input:focus, .adv-select:focus {
+    border-color: #58a6ff;
+  }
+
+  .adv-hint {
+    font-size: 0.74rem;
+    color: #8b949e;
+    line-height: 1.35;
+  }
+
+  .advanced-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+    flex-wrap: wrap;
+  }
+
+  .btn-secondary {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #c9d1d9;
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    color: #f0f6fc;
   }
 </style>

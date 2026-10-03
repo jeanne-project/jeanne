@@ -324,8 +324,53 @@ async fn unload_local_model(state: tauri::State<'_, AppState>) -> Result<(), Str
 #[tauri::command]
 async fn get_hardware_profile(state: tauri::State<'_, AppState>) -> Result<HardwareInfo, String> {
     let mut hw = state.local_engine.hardware_info().clone();
+    let config = state.local_engine.get_config().await;
+    if !config.use_gpu {
+        hw.vulkan_supported = false;
+        hw.vulkan_device_name = Some("Désactivé (Mode CPU forcé)".to_string());
+    }
     hw.recommended_model_loaded = state.local_engine.is_model_loaded().await;
     Ok(hw)
+}
+
+#[tauri::command]
+async fn get_local_engine_config(
+    state: tauri::State<'_, AppState>,
+) -> Result<LocalEngineConfig, String> {
+    Ok(state.local_engine.get_config().await)
+}
+
+#[tauri::command]
+async fn update_local_engine_config(
+    state: tauri::State<'_, AppState>,
+    config: LocalEngineConfig,
+) -> Result<LocalEngineConfig, String> {
+    tracing::info!(
+        ">>> [IPC:update_local_engine_config] use_gpu={}, timeout={}s, temp={}, ctx={}",
+        config.use_gpu,
+        config.generation_timeout_secs,
+        config.temperature,
+        config.context_size
+    );
+
+    let settings_dir = state.vault_path.join(".jeanne");
+    if let Err(e) = tokio::fs::create_dir_all(&settings_dir).await {
+        tracing::warn!("Impossible de créer le répertoire .jeanne : {e}");
+    }
+    let settings_file = settings_dir.join("local_llm_settings.json");
+    if let Ok(serialized) = serde_json::to_string_pretty(&config) {
+        if let Err(e) = tokio::fs::write(&settings_file, serialized).await {
+            tracing::warn!("Impossible d'enregistrer local_llm_settings.json : {e}");
+        } else {
+            tracing::info!(
+                "Configuration du moteur local enregistrée dans {:?}",
+                settings_file
+            );
+        }
+    }
+
+    state.local_engine.update_config(config).await;
+    Ok(state.local_engine.get_config().await)
 }
 
 #[tauri::command]
@@ -674,7 +719,9 @@ pub fn run() {
             ai_process_clipboard,
             ask_vault,
             list_available_models,
-            get_models_directory
+            get_models_directory,
+            get_local_engine_config,
+            update_local_engine_config
         ])
         .setup(|app| {
             tracing::info!("Initialisation des sous-systèmes Jeanne Desktop...");
@@ -729,7 +776,33 @@ pub fn run() {
                 );
             }
 
-            let local_engine = Arc::new(LocalLlmEngine::new(LocalEngineConfig::default()));
+            let settings_file = vault_path.join(".jeanne").join("local_llm_settings.json");
+            let initial_config = if settings_file.exists() {
+                match std::fs::read_to_string(&settings_file) {
+                    Ok(content) => {
+                        match serde_json::from_str::<LocalEngineConfig>(&content) {
+                            Ok(conf) => {
+                                tracing::info!(
+                                    "Configuration du modèle local chargée depuis {:?}",
+                                    settings_file
+                                );
+                                conf
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Erreur décodage configuration locale ({e}), utilisation par défaut."
+                                );
+                                LocalEngineConfig::default()
+                            }
+                        }
+                    }
+                    Err(_) => LocalEngineConfig::default(),
+                }
+            } else {
+                LocalEngineConfig::default()
+            };
+
+            let local_engine = Arc::new(LocalLlmEngine::new(initial_config));
 
             app.manage(AppState {
                 storage: storage_arc,
@@ -1065,5 +1138,63 @@ mod tests {
         assert_eq!(stats.memory_allocated_mb, 0);
 
         assert!(app_state.local_engine.unload_model().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_desktop_local_engine_config_update_and_persistence() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("test.db");
+        let storage = StorageManager::open(&db_path).expect("open storage");
+        storage.init_schema().expect("init schema");
+
+        let local_engine = Arc::new(LocalLlmEngine::new(LocalEngineConfig::default()));
+        let app_state = AppState {
+            storage: Arc::new(Mutex::new(storage)),
+            vault_path: temp_dir.path().to_path_buf(),
+            watcher: Mutex::new(None),
+            local_engine: local_engine.clone(),
+        };
+
+        let initial = app_state.local_engine.get_config().await;
+        assert!(initial.use_gpu);
+        assert_eq!(initial.generation_timeout_secs, 10);
+
+        let mut updated = initial.clone();
+        updated.use_gpu = false;
+        updated.generation_timeout_secs = 20;
+
+        // Persistence in vault directory .jeanne/local_llm_settings.json
+        let settings_dir = app_state.vault_path.join(".jeanne");
+        tokio::fs::create_dir_all(&settings_dir)
+            .await
+            .expect("mkdir");
+        let settings_file = settings_dir.join("local_llm_settings.json");
+        let serialized = serde_json::to_string_pretty(&updated).expect("serialize");
+        tokio::fs::write(&settings_file, serialized)
+            .await
+            .expect("write");
+        app_state.local_engine.update_config(updated.clone()).await;
+
+        let fetched = app_state.local_engine.get_config().await;
+        assert!(!fetched.use_gpu);
+        assert_eq!(fetched.generation_timeout_secs, 20);
+
+        // Verify hardware profile reports CPU forced mode when use_gpu is false
+        let mut hw = app_state.local_engine.hardware_info().clone();
+        if !fetched.use_gpu {
+            hw.vulkan_supported = false;
+            hw.vulkan_device_name = Some("Désactivé (Mode CPU forcé)".to_string());
+        }
+        assert!(!hw.vulkan_supported);
+        assert_eq!(
+            hw.vulkan_device_name.as_deref(),
+            Some("Désactivé (Mode CPU forcé)")
+        );
+
+        // Verify reloading from disk matches
+        let disk_content = std::fs::read_to_string(&settings_file).expect("read");
+        let parsed: LocalEngineConfig = serde_json::from_str(&disk_content).expect("parse");
+        assert!(!parsed.use_gpu);
+        assert_eq!(parsed.generation_timeout_secs, 20);
     }
 }

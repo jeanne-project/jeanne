@@ -149,6 +149,7 @@ async fn test_04c_06_load_local_engine_with_discovered_model() {
         threads: None,
         use_vulkan: false,
         expected_sha256: None,
+        ..Default::default()
     };
 
     let engine = LocalLlmEngine::new(config);

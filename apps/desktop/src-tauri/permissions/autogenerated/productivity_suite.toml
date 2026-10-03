@@ -60,3 +60,14 @@ identifier = "allow-get-models-directory"
 description = "Enables get_models_directory command."
 commands.allow = ["get_models_directory"]
 
+[[permission]]
+identifier = "allow-get-local-engine-config"
+description = "Enables get_local_engine_config command."
+commands.allow = ["get_local_engine_config"]
+
+[[permission]]
+identifier = "allow-update-local-engine-config"
+description = "Enables update_local_engine_config command."
+commands.allow = ["update_local_engine_config"]
+
+

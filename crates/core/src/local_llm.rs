@@ -42,13 +42,41 @@ impl Default for LocalInferenceStats {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_timeout() -> u64 {
+    10
+}
+
+fn default_temperature() -> f32 {
+    0.3
+}
+
+fn default_max_tokens() -> u32 {
+    1024
+}
+
 /// Configuration du moteur d'inférence local.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LocalEngineConfig {
     pub model_path: Option<String>,
     pub context_size: u32,
     pub threads: Option<u32>,
     pub use_vulkan: bool,
+    #[serde(default = "default_true")]
+    pub use_gpu: bool,
+    #[serde(default)]
+    pub gpu_layers: Option<u32>,
+    #[serde(default = "default_timeout")]
+    pub generation_timeout_secs: u64,
+    #[serde(default = "default_temperature")]
+    pub temperature: f32,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+    #[serde(default)]
+    pub daemon_endpoint: Option<String>,
     pub expected_sha256: Option<String>,
 }
 
@@ -59,6 +87,12 @@ impl Default for LocalEngineConfig {
             context_size: 4096,
             threads: None,
             use_vulkan: true,
+            use_gpu: true,
+            gpu_layers: None,
+            generation_timeout_secs: 10,
+            temperature: 0.3,
+            max_tokens: 1024,
+            daemon_endpoint: None,
             expected_sha256: None,
         }
     }
@@ -86,7 +120,7 @@ pub struct LoadedModel {
 
 /// Moteur d'inférence local single-tenant encapsulant l'état du modèle et la boucle de génération.
 pub struct LocalLlmEngine {
-    config: LocalEngineConfig,
+    config: Arc<Mutex<LocalEngineConfig>>,
     context_size: u32,
     state: Arc<Mutex<Option<LoadedModel>>>,
     stats: Arc<Mutex<LocalInferenceStats>>,
@@ -99,17 +133,44 @@ impl LocalLlmEngine {
     pub fn new(mut config: LocalEngineConfig) -> Self {
         let clamped_context = config.context_size.min(4096);
         config.context_size = clamped_context;
+        config.use_vulkan = config.use_gpu;
 
         let hardware = detect_hardware();
 
         Self {
-            config,
+            config: Arc::new(Mutex::new(config)),
             context_size: clamped_context,
             state: Arc::new(Mutex::new(None)),
             stats: Arc::new(Mutex::new(LocalInferenceStats::default())),
             generation_lock: Arc::new(Mutex::new(())),
             hardware,
         }
+    }
+
+    /// Récupère une copie de la configuration actuelle du moteur local.
+    pub async fn get_config(&self) -> LocalEngineConfig {
+        let conf = self.config.lock().await;
+        conf.clone()
+    }
+
+    /// Met à jour la configuration du moteur local (GPU, threads, timeout, température, etc.).
+    pub async fn update_config(&self, mut new_config: LocalEngineConfig) {
+        let clamped_context = new_config.context_size.min(4096);
+        new_config.context_size = clamped_context;
+        new_config.use_vulkan = new_config.use_gpu;
+
+        tracing::info!(
+            "[LocalLLM] Mise à jour configuration : use_gpu={}, gpu_layers={:?}, threads={:?}, timeout={}s, temp={}, ctx={}",
+            new_config.use_gpu,
+            new_config.gpu_layers,
+            new_config.threads,
+            new_config.generation_timeout_secs,
+            new_config.temperature,
+            new_config.context_size
+        );
+
+        let mut conf = self.config.lock().await;
+        *conf = new_config;
     }
 
     /// Taille maximale du contexte KV (strictement $\le 4096$).
@@ -144,7 +205,12 @@ impl LocalLlmEngine {
     pub async fn load_model(&self, model_path: Option<String>) -> Result<(), LlmError> {
         let start_load = Instant::now();
 
-        let path = match model_path.as_deref().or(self.config.model_path.as_deref()) {
+        let (config_model_path, expected_sha256) = {
+            let conf = self.config.lock().await;
+            (conf.model_path.clone(), conf.expected_sha256.clone())
+        };
+
+        let path = match model_path.as_deref().or(config_model_path.as_deref()) {
             Some(req) => crate::model_discovery::resolve_model_path(Some(req)),
             None => crate::model_discovery::resolve_model_path(None),
         }
@@ -179,7 +245,7 @@ impl LocalLlmEngine {
         );
 
         // 2. Vérification d'intégrité SHA-256 si configurée
-        if let Some(expected_hash) = &self.config.expected_sha256 {
+        if let Some(expected_hash) = &expected_sha256 {
             tracing::info!("[LocalLLM] Vérification de l'empreinte SHA-256 en cours...");
             verify_model_sha256(&path, expected_hash)?;
             tracing::info!("[LocalLLM] Empreinte SHA-256 vérifiée avec succès.");
@@ -286,6 +352,10 @@ impl LocalLlmEngine {
             }
         };
 
+        let current_config = self.get_config().await;
+        let timeout_secs = current_config.generation_timeout_secs.max(1);
+        let timeout_duration = Duration::from_secs(timeout_secs);
+
         let stats_arc = self.stats.clone();
         let prompt_token_count = prompt.split_whitespace().count().max(1);
 
@@ -296,16 +366,27 @@ impl LocalLlmEngine {
             let start = Instant::now();
 
             tracing::debug!(
-                "[LocalLLM] Début de génération pour prompt (longueur={} cars, ~{} tokens)",
+                "[LocalLLM] Début de génération (longueur={} cars, ~{} tokens, timeout={}s, use_gpu={})",
                 prompt.len(),
-                prompt_token_count
+                prompt_token_count,
+                timeout_secs,
+                current_config.use_gpu
             );
 
             // 1. Tenter d'interroger un serveur LLM neuronal local actif (Ollama, llama-server, LM Studio)
             let mut streamed_via_daemon = false;
             let mut generated_count = 0usize;
 
-            if let Some(count) = try_stream_from_local_daemon(&prompt, &tx, &cancellation).await {
+            if let Some(count) = try_stream_from_local_daemon(
+                &prompt,
+                &current_config,
+                &tx,
+                &cancellation,
+                start,
+                timeout_duration,
+            )
+            .await
+            {
                 streamed_via_daemon = true;
                 generated_count = count;
             }
@@ -319,6 +400,20 @@ impl LocalLlmEngine {
                         tracing::debug!(
                             "[LocalLLM] Flux de génération interrompu par annulation utilisateur."
                         );
+                        break;
+                    }
+
+                    if start.elapsed() >= timeout_duration {
+                        tracing::warn!(
+                            "[LocalLLM] Timeout de génération ({}s) atteint. Interruption préventive pour protéger le système.",
+                            timeout_secs
+                        );
+                        let _ = tx
+                            .send(
+                                "\n\n⏱️ [Délai d'inférence dépassé : génération interrompue]"
+                                    .to_string(),
+                            )
+                            .await;
                         break;
                     }
 
@@ -591,26 +686,40 @@ pub fn compress_local_prompt(
 
 async fn try_stream_from_local_daemon(
     prompt: &str,
+    config: &LocalEngineConfig,
     tx: &mpsc::Sender<String>,
     cancellation: &CancellationToken,
+    start: Instant,
+    timeout_duration: Duration,
 ) -> Option<usize> {
-    let endpoints = [
-        "http://127.0.0.1:11434/v1", // Ollama
-        "http://127.0.0.1:8080/v1",  // llama-server
-        "http://127.0.0.1:1234/v1",  // LM Studio
-    ];
+    let mut endpoints: Vec<String> = Vec::new();
+    if let Some(custom) = &config.daemon_endpoint {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            endpoints.push(trimmed.trim_end_matches('/').to_string());
+        }
+    }
+    endpoints.push("http://127.0.0.1:11434/v1".to_string()); // Ollama
+    endpoints.push("http://127.0.0.1:8080/v1".to_string()); // llama-server
+    endpoints.push("http://127.0.0.1:1234/v1".to_string()); // LM Studio
 
     let client = match reqwest::Client::builder()
         .connect_timeout(Duration::from_millis(200))
-        .timeout(Duration::from_secs(30))
+        .timeout(timeout_duration)
         .build()
     {
         Ok(c) => c,
         Err(_) => return None,
     };
 
+    let num_gpu = if config.use_gpu {
+        config.gpu_layers.unwrap_or(99)
+    } else {
+        0
+    };
+
     for base_url in endpoints {
-        if cancellation.is_cancelled() {
+        if cancellation.is_cancelled() || start.elapsed() >= timeout_duration {
             return None;
         }
 
@@ -621,20 +730,39 @@ async fn try_stream_from_local_daemon(
                 {"role": "user", "content": prompt}
             ],
             "stream": true,
-            "temperature": 0.3
+            "temperature": config.temperature,
+            "max_tokens": config.max_tokens,
+            "options": {
+                "num_gpu": num_gpu,
+                "num_thread": config.threads
+            }
         });
 
         if let Ok(resp) = client.post(&url).json(&payload).send().await {
             if resp.status().is_success() {
                 tracing::info!(
-                    "[LocalLLM] Serveur d'inférence neuronal actif détecté sur {} ! Diffusion des jetons réels...",
-                    base_url
+                    "[LocalLLM] Serveur d'inférence neuronal actif détecté sur {} ! GPU offload: {} couches. Diffusion des jetons réels...",
+                    base_url,
+                    num_gpu
                 );
                 let mut event_stream = resp.bytes_stream().eventsource();
                 let mut token_count = 0usize;
 
                 while let Some(item) = event_stream.next().await {
                     if cancellation.is_cancelled() {
+                        break;
+                    }
+                    if start.elapsed() >= timeout_duration {
+                        tracing::warn!(
+                            "[LocalLLM] Timeout de génération ({}s) atteint pendant le streaming daemon.",
+                            timeout_duration.as_secs()
+                        );
+                        let _ = tx
+                            .send(
+                                "\n\n⏱️ [Délai d'inférence dépassé : génération interrompue]"
+                                    .to_string(),
+                            )
+                            .await;
                         break;
                     }
                     if let Ok(event) = item {

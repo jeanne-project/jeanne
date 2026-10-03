@@ -30,7 +30,9 @@
     "allow-ai-process-clipboard",
     "allow-ask-vault",
     "allow-list-available-models",
-    "allow-get-models-directory"
+    "allow-get-models-directory",
+    "allow-get-local-engine-config",
+    "allow-update-local-engine-config"
   ]
 }
 

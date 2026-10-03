@@ -19,7 +19,7 @@ use jeanne_core::local_llm::{
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 use tokio_util::sync::CancellationToken;
 
@@ -62,6 +62,7 @@ async fn test_04_01_memory_ceiling_under_active_generation() {
         threads: Some(4),
         use_vulkan: true,
         expected_sha256: Some(hash),
+        ..Default::default()
     };
 
     let engine = LocalLlmEngine::new(config);
@@ -85,6 +86,7 @@ async fn test_04_02_explicit_deallocation_unloads_memory_rapidly() {
         threads: Some(4),
         use_vulkan: true,
         expected_sha256: Some(hash),
+        ..Default::default()
     };
 
     let engine = LocalLlmEngine::new(config);
@@ -113,6 +115,7 @@ async fn test_04_03_inference_throughput_measurement() {
         threads: Some(4),
         use_vulkan: true,
         expected_sha256: Some(hash),
+        ..Default::default()
     };
 
     let engine = LocalLlmEngine::new(config);
@@ -144,6 +147,7 @@ async fn test_04_04_strict_kv_context_bounding() {
         threads: None,
         use_vulkan: false,
         expected_sha256: None,
+        ..Default::default()
     };
 
     let engine = LocalLlmEngine::new(config);
@@ -204,6 +208,7 @@ async fn test_04_06_single_tenant_concurrency_control_returns_busy() {
         threads: Some(2),
         use_vulkan: true,
         expected_sha256: Some(hash),
+        ..Default::default()
     };
 
     let engine = Arc::new(LocalLlmEngine::new(config));
@@ -254,6 +259,7 @@ async fn test_04_07_unload_idempotence_and_state_reset() {
         threads: None,
         use_vulkan: true,
         expected_sha256: Some(hash),
+        ..Default::default()
     };
 
     let engine = LocalLlmEngine::new(config);
@@ -342,6 +348,7 @@ async fn test_04_11_immediate_stream_cancellation() {
         threads: Some(2),
         use_vulkan: true,
         expected_sha256: Some(hash),
+        ..Default::default()
     };
 
     let engine = LocalLlmEngine::new(config);
@@ -380,6 +387,7 @@ async fn test_04_12_llm_provider_trait_integration() {
         threads: Some(2),
         use_vulkan: true,
         expected_sha256: Some(hash),
+        ..Default::default()
     };
 
     let engine = LocalLlmEngine::new(config);
@@ -529,4 +537,89 @@ fn test_04_17_synthesize_local_response_corrige_action() {
     let trad_tokens = synthesize_local_response(trad_prompt);
     let trad_full = trad_tokens.join("");
     assert_eq!(trad_full, "Hello, how are you?");
+}
+
+#[tokio::test]
+async fn test_04_18_generation_timeout_enforcement() {
+    let (gguf_file, hash) = create_synthetic_gguf_file(1024);
+    let config = LocalEngineConfig {
+        model_path: Some(gguf_file.path().to_string_lossy().to_string()),
+        context_size: 2048,
+        threads: Some(2),
+        use_vulkan: false,
+        use_gpu: false,
+        generation_timeout_secs: 1, // Strict 1s timeout
+        expected_sha256: Some(hash),
+        ..Default::default()
+    };
+
+    let engine = LocalLlmEngine::new(config);
+    engine.load_model(None).await.expect("Model should load");
+
+    let cancel = CancellationToken::new();
+    // A prompt generating > 60 tokens so that at 25ms/token it exceeds the 1s timeout
+    let long_body =
+        "Ceci est une phrase de test pour valider le mécanisme de coupure par temporisation. "
+            .repeat(8);
+    let prompt = format!(
+        "Reformule le texte ci-dessous avec un ton pro :\n\n{}",
+        long_body
+    );
+    let start = Instant::now();
+    let mut rx = engine
+        .generate_stream(prompt, cancel)
+        .await
+        .expect("Stream should start");
+
+    let mut full_output = String::new();
+    while let Some(tok) = rx.recv().await {
+        full_output.push_str(&tok);
+    }
+    let elapsed = start.elapsed();
+
+    // Must have timed out and printed warning marker
+    assert!(
+        full_output.contains("Délai d'inférence dépassé"),
+        "Output should contain timeout indicator: got '{}'",
+        full_output
+    );
+    // Elapsed should be close to 1-2 seconds, not indefinite
+    assert!(elapsed < Duration::from_secs(3));
+}
+
+#[tokio::test]
+async fn test_04_19_config_update_and_gpu_toggle() {
+    let engine = LocalLlmEngine::new(LocalEngineConfig::default());
+    let initial_config = engine.get_config().await;
+    assert!(initial_config.use_gpu);
+    assert_eq!(initial_config.generation_timeout_secs, 10);
+
+    let updated = LocalEngineConfig {
+        model_path: None,
+        context_size: 2048,
+        threads: Some(8),
+        use_vulkan: false,
+        use_gpu: false,
+        gpu_layers: Some(0),
+        generation_timeout_secs: 25,
+        temperature: 0.8,
+        max_tokens: 512,
+        daemon_endpoint: Some("http://localhost:5000/v1".to_string()),
+        expected_sha256: None,
+    };
+
+    engine.update_config(updated.clone()).await;
+    let fetched = engine.get_config().await;
+
+    assert!(!fetched.use_gpu);
+    assert!(!fetched.use_vulkan); // use_vulkan aligns with use_gpu
+    assert_eq!(fetched.gpu_layers, Some(0));
+    assert_eq!(fetched.threads, Some(8));
+    assert_eq!(fetched.generation_timeout_secs, 25);
+    assert_eq!(fetched.temperature, 0.8);
+    assert_eq!(fetched.max_tokens, 512);
+    assert_eq!(
+        fetched.daemon_endpoint.as_deref(),
+        Some("http://localhost:5000/v1")
+    );
 }
