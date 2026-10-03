@@ -33,4 +33,5 @@ __pycache__/
 .venv/
 venv/
 tools/llm-benchmark/reports/
+tools/llm-benchmark/config.json
 

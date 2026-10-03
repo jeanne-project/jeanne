@@ -48,31 +48,66 @@ Les rapports seront générés dans le dossier `tools/llm-benchmark/reports/`.
 
 ---
 
-## ⚙️ Configuration (`config.json`)
-
-Copiez le fichier d'exemple pour créer votre configuration :
+### 1. Initialisation Automatique (`init`)
+L'outil propose une commande `init` qui sonde automatiquement votre matériel (CPU, RAM, GPU/Vulkan) et prépare la configuration de base avec les profils d'inférence recommandés :
 
 ```bash
-cp tools/llm-benchmark/config.example.json tools/llm-benchmark/config.json
+# Initialisation simple (détection du hardware + modèles recommandés ou Ollama local) :
+python3 tools/llm-benchmark/benchmark.py init
+
+# Initialisation en scannant un dossier local contenant vos modèles GGUF :
+python3 tools/llm-benchmark/benchmark.py init --models-dir /chemin/vers/mes/modeles/
+
+# Options disponibles pour init :
+#   --models-dir, -d : Dossier à scanner récursivement (.gguf, .bin, .safetensors)
+#   --endpoint, -e   : URL d'inférence par défaut (défaut: http://localhost:11434/v1)
+#   --output, -o     : Fichier de sortie (défaut: config.json)
+#   --force, -f      : Écraser la configuration existante
+#   --no-probe       : Ne pas sonder le serveur Ollama local
 ```
 
-Éditez `tools/llm-benchmark/config.json` pour déclarer votre machine et vos modèles :
+### 2. Tester en mode simulation (Dry-Run)
+Pour vérifier le bon fonctionnement de la suite et observer la génération des rapports sans serveur actif :
+
+```bash
+python3 tools/llm-benchmark/benchmark.py --mock
+```
+
+Les rapports seront générés dans le dossier `tools/llm-benchmark/reports/`.
+
+---
+
+## ⚙️ Structure de Configuration (`config.json`)
+
+Le fichier `config.json` produit automatiquement ressemble à ceci :
 
 ```json
 {
-  "hardware_profile": "AMD Ryzen 7 7840HS / 16 Go RAM / Radeon 780M iGPU",
+  "hardware_profile": "AMD Ryzen 7 7840HS (16 threads) | 16.0 Go RAM | GPU: AMD Radeon 780M (Vulkan)",
   "inference_profiles": {
     "deterministic_strict": {
       "temperature": 0.0,
       "seed": 42,
       "top_p": 1.0,
-      "max_tokens": 1024
+      "max_tokens": 1024,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
     },
     "balanced_temp03": {
       "temperature": 0.3,
       "seed": 42,
       "top_p": 0.9,
-      "max_tokens": 1024
+      "max_tokens": 1024,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    },
+    "creative_temp07": {
+      "temperature": 0.7,
+      "seed": 123,
+      "top_p": 0.95,
+      "max_tokens": 1024,
+      "frequency_penalty": 0.1,
+      "presence_penalty": 0.1
     }
   },
   "models": [
@@ -81,16 +116,11 @@ cp tools/llm-benchmark/config.example.json tools/llm-benchmark/config.json
       "display_name": "Qwen 2.5 3B (Q4_K_M)",
       "endpoint": "http://localhost:11434/v1",
       "profiles": ["deterministic_strict", "balanced_temp03"]
-    },
-    {
-      "id": "llama3.2:3b-instruct-q4_k_m",
-      "display_name": "Llama 3.2 3B (Q4_K_M)",
-      "endpoint": "http://localhost:11434/v1",
-      "profiles": ["deterministic_strict"]
     }
   ]
 }
 ```
+
 
 ---
 

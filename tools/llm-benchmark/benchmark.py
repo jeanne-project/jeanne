@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Jeanne LLM Benchmark Runner
+Jeanne LLM Benchmark Runner & Config Initializer
 A standalone, deterministic benchmarking tool to evaluate and compare LLMs
 for the Jeanne project across realistic local productivity scenarios.
 """
@@ -17,6 +17,13 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 from client import LlmClient
+from config_template import DEFAULT_INFERENCE_PROFILES, build_benchmark_config
+from hardware_detector import detect_host_hardware
+from model_scanner import (
+    get_default_recommended_models,
+    probe_ollama_models,
+    scan_models_directory,
+)
 from reporter import BenchmarkReporter
 from suites import get_all_test_cases, get_available_suites
 from suites.base import BenchmarkSuiteResult, InferenceParams, TestCase, TestResult
@@ -31,7 +38,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
     target = config_path
     if not os.path.exists(target):
         if os.path.exists(EXAMPLE_CONFIG_FILE):
-            print(f"⚠️  Fichier {config_path} introuvable. Utilisation de {EXAMPLE_CONFIG_FILE}")
+            print(f"⚠️  Fichier {config_path} introuvable. Utilisation du template {EXAMPLE_CONFIG_FILE}")
             target = EXAMPLE_CONFIG_FILE
         else:
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -51,6 +58,99 @@ def parse_inference_profile(profile_dict: Dict[str, Any]) -> InferenceParams:
         presence_penalty=float(profile_dict.get("presence_penalty", 0.0)),
     )
 
+
+# ==============================================================================
+# SUB-COMMAND: INIT (Génération automatique de configuration)
+# ==============================================================================
+
+def execute_init(args: argparse.Namespace) -> None:
+    """Detects host hardware, scans for model files, and generates config.json."""
+    output_path = args.output
+    if not os.path.isabs(output_path):
+        output_path = os.path.abspath(os.path.join(current_dir, output_path))
+
+    if os.path.exists(output_path) and not args.force:
+        print(f"⚠️  Le fichier de configuration '{output_path}' existe déjà.")
+        print("   Utilisez l'option '--force' (ou '-f') pour l'écraser.")
+        sys.exit(1)
+
+    print("\n" + "=" * 70)
+    print("   🔍 INITIALISATION AUTOMATIQUE DU BENCHMARK JEANNE")
+    print("=" * 70)
+
+    # 1. Détection matérielle
+    print("🖥️  Sondage des spécifications matérielles de la machine hôte...")
+    hw = detect_host_hardware()
+    hw_summary = hw["summary"]
+    print(f"   • Système : {hw['os']}")
+    print(f"   • Processeur : {hw['cpu']} ({hw['cpu_threads']} threads logiques)")
+    print(f"   • Mémoire vive (RAM) : {hw['ram_gb']} Go")
+    print(f"   • Graphismes / GPU : {hw['gpu']}")
+    print(f"   • Accélération matérielle : {'Oui (Vulkan/Metal)' if hw['hardware_acceleration'] else 'CPU uniquement'}")
+
+    # 2. Découverte des modèles
+    models: List[Dict[str, Any]] = []
+
+    if args.models_dir:
+        print(f"\n📂 Recherche de modèles dans le dossier : {args.models_dir}")
+        discovered = scan_models_directory(
+            models_dir=args.models_dir,
+            default_endpoint=args.endpoint,
+        )
+        if discovered:
+            print(f"   ✔️ {len(discovered)} fichier(s) de modèle trouvé(s) :")
+            for m in discovered:
+                print(f"      - {m['id']} [{m.get('size', '')}]")
+            models.extend(discovered)
+        else:
+            print("   ℹ️  Aucun fichier (.gguf, .bin, .safetensors) trouvé dans ce dossier.")
+
+    # 3. Sonde Ollama si aucun dossier ou pas de modèles trouvés
+    if not models and not args.no_probe:
+        print("\n🦙 Vérification de la présence d'un serveur Ollama local actif...")
+        ollama_models = probe_ollama_models(default_profiles=["deterministic_strict", "balanced_temp03"])
+        if ollama_models:
+            print(f"   ✔️ {len(ollama_models)} modèle(s) détecté(s) sur Ollama :")
+            for m in ollama_models:
+                print(f"      - {m['id']} [{m.get('size', '')}]")
+            models.extend(ollama_models)
+        else:
+            print("   ℹ️  Serveur Ollama non détecté ou aucun modèle téléchargé.")
+
+    # 4. Modèles de référence recommandés si rien n'a été découvert
+    if not models:
+        print("\n📦 Inclusion des modèles de référence recommandés pour Jeanne...")
+        models = get_default_recommended_models(default_endpoint=args.endpoint)
+        for m in models:
+            print(f"   - {m['display_name']} (Endpoint: {m['endpoint']})")
+
+    # 5. Construction de la configuration finale
+    config_dict = build_benchmark_config(
+        hardware_summary=hw_summary,
+        models=models,
+        custom_profiles=DEFAULT_INFERENCE_PROFILES,
+    )
+
+    # Création du dossier parent si nécessaire
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(config_dict, f, indent=2, ensure_ascii=False)
+
+    print("\n" + "=" * 70)
+    print("✅ CONFIGURATION INITIALISÉE AVEC SUCCÈS !")
+    print("=" * 70)
+    print(f"📄 Fichier généré : \033[1;32m{output_path}\033[0m")
+    print(f"⚙️  Profils d'inférence configurés : {list(DEFAULT_INFERENCE_PROFILES.keys())}")
+    print(f"🤖 Modèles configurés : {len(models)}")
+    print("\n👉 Vous pouvez dès à présent lancer le benchmark avec :")
+    print("   python3 tools/llm-benchmark/benchmark.py")
+    print("=" * 70 + "\n")
+
+
+# ==============================================================================
+# SUB-COMMAND: RUN (Exécution du benchmark)
+# ==============================================================================
 
 def run_benchmark_for_model_profile(
     model_cfg: Dict[str, Any],
@@ -93,7 +193,6 @@ def run_benchmark_for_model_profile(
     for idx, tc in enumerate(test_cases, start=1):
         print(f"   [{idx}/{len(test_cases)}] Test '{tc.name}' ({tc.category})... ", end="", flush=True)
 
-        # Allow test case to override params if strictly required, otherwise use profile params
         effective_params = tc.recommended_params or params
 
         try:
@@ -102,10 +201,8 @@ def run_benchmark_for_model_profile(
                 params=effective_params,
             )
 
-            # Evaluate assertions deterministically
             assertions = tc.evaluator(response_text)
 
-            # Overall test score = average of assertion scores * 100
             if assertions:
                 avg_score = (sum(a.score for a in assertions) / len(assertions)) * 100.0
                 all_passed = all(a.passed for a in assertions)
@@ -168,7 +265,6 @@ def run_benchmark_for_model_profile(
             category_scores_map[tc.category] = []
         category_scores_map[tc.category].append(test_res.score)
 
-    # Compute overall score and averages
     if suite_result.test_results:
         suite_result.overall_score = sum(t.score for t in suite_result.test_results) / len(suite_result.test_results)
         valid_ttfts = [t.ttft_ms for t in suite_result.test_results if t.ttft_ms > 0]
@@ -187,73 +283,22 @@ def run_benchmark_for_model_profile(
     return suite_result
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Jeanne LLM Benchmark - Banc de test déterministe pour modèles de langage."
-    )
-    parser.add_argument(
-        "--config",
-        "-c",
-        default=DEFAULT_CONFIG_FILE,
-        help="Chemin vers le fichier de configuration JSON (défaut: config.json)",
-    )
-    parser.add_argument(
-        "--models",
-        "-m",
-        help="Liste d'identifiants de modèles à tester, séparés par des virgules (ex: qwen2.5:3b,llama3.2:3b)",
-    )
-    parser.add_argument(
-        "--profiles",
-        "-p",
-        help="Liste de profils d'inférence à tester, séparés par des virgules (ex: deterministic_strict,balanced)",
-    )
-    parser.add_argument(
-        "--suites",
-        "-s",
-        help="Suites à exécuter (rag, pii, structured, meeting, conciseness) séparées par des virgules",
-    )
-    parser.add_argument(
-        "--output-dir",
-        "-o",
-        default=os.path.join(current_dir, "reports"),
-        help="Répertoire de sortie des rapports (défaut: reports/)",
-    )
-    parser.add_argument(
-        "--mock",
-        action="store_true",
-        help="Mode simulation déterministe (aucun serveur LLM actif requis)",
-    )
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Affichage détaillé des assertions en console",
-    )
-
-    args = parser.parse_args()
-
-    # 1. Charger la configuration
+def execute_run(args: argparse.Namespace) -> None:
+    """Executes the benchmark matrix and generates reports."""
     try:
         config = load_config(args.config)
     except Exception as e:
         print(f"❌ Erreur de chargement de la configuration: {e}")
+        print("💡 Vous pouvez initialiser un fichier de configuration avec :")
+        print("   python3 tools/llm-benchmark/benchmark.py init")
         sys.exit(1)
 
-    hardware_profile = config.get("hardware_profile", "PC Personnel (profil non spécifié)")
+    hardware_profile = config.get("hardware_profile", "PC Personnel")
     inference_profiles_dict = config.get("inference_profiles", {})
 
-    # Default fallback profile if none defined
     if not inference_profiles_dict:
-        inference_profiles_dict = {
-            "deterministic_strict": {
-                "temperature": 0.0,
-                "seed": 42,
-                "top_p": 1.0,
-                "max_tokens": 1024,
-            }
-        }
+        inference_profiles_dict = DEFAULT_INFERENCE_PROFILES
 
-    # 2. Filtrer les suites de tests
     available_suites = get_available_suites()
     if args.suites:
         selected_suite_names = [s.strip().lower() for s in args.suites.split(",")]
@@ -270,7 +315,6 @@ def main():
         print("❌ Aucun test sélectionné.")
         sys.exit(1)
 
-    # 3. Filtrer les modèles
     all_models = config.get("models", [])
     if args.models:
         selected_model_ids = [m.strip() for m in args.models.split(",")]
@@ -282,7 +326,6 @@ def main():
         print("❌ Aucun modèle à tester dans la configuration.")
         sys.exit(1)
 
-    # 4. Filtrer les profils
     allowed_profiles = [p.strip() for p in args.profiles.split(",")] if args.profiles else None
 
     print("\n" + "=" * 70)
@@ -297,7 +340,6 @@ def main():
 
     all_results: List[BenchmarkSuiteResult] = []
 
-    # 5. Exécution de la matrice (Modèle x Profils)
     for model_cfg in models_to_test:
         model_profiles = model_cfg.get("profiles", list(inference_profiles_dict.keys()))
 
@@ -320,7 +362,6 @@ def main():
             )
             all_results.append(res)
 
-    # 6. Génération des rapports déterministes
     reporter = BenchmarkReporter(
         hardware_profile=hardware_profile,
         suites_results=all_results,
@@ -335,6 +376,106 @@ def main():
     print(f"📄 Rapport Markdown généré (prêt pour GitHub) :\n   👉 \033[1;32m{report_files['markdown']}\033[0m")
     print(f"💾 Données brutes JSON générées :\n   👉 \033[1;34m{report_files['json']}\033[0m")
     print("=" * 70 + "\n")
+
+
+# ==============================================================================
+# MAIN CLI DISPATCHER
+# ==============================================================================
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Jeanne LLM Benchmark - Banc de test déterministe pour modèles de langage."
+    )
+
+    subparsers = parser.add_subparsers(dest="command", help="Commande à exécuter")
+
+    # Sub-command: init
+    init_parser = subparsers.add_parser("init", help="Initialiser la configuration automatiquement")
+    init_parser.add_argument(
+        "--models-dir",
+        "-d",
+        help="Chemin vers un dossier local contenant les fichiers modèles GGUF à tester",
+    )
+    init_parser.add_argument(
+        "--endpoint",
+        "-e",
+        default="http://localhost:11434/v1",
+        help="Endpoint d'inférence par défaut (défaut: http://localhost:11434/v1)",
+    )
+    init_parser.add_argument(
+        "--output",
+        "-o",
+        default=DEFAULT_CONFIG_FILE,
+        help="Chemin de sortie du fichier de configuration (défaut: config.json)",
+    )
+    init_parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Écraser le fichier de configuration s'il existe déjà",
+    )
+    init_parser.add_argument(
+        "--no-probe",
+        action="store_true",
+        help="Ne pas sonder le serveur Ollama local",
+    )
+
+    # Sub-command: run
+    run_parser = subparsers.add_parser("run", help="Exécuter les benchmarks")
+    for p in [parser, run_parser]:
+        # Support both top-level arguments (python3 benchmark.py --mock) and run sub-command
+        if p is parser:
+            # We add top-level arguments directly to parser as fallback
+            pass
+        p.add_argument(
+            "--config",
+            "-c",
+            default=DEFAULT_CONFIG_FILE,
+            help="Chemin vers le fichier de configuration JSON (défaut: config.json)",
+        )
+        p.add_argument(
+            "--models",
+            "-m",
+            help="Liste d'identifiants de modèles à tester, séparés par des virgules",
+        )
+        p.add_argument(
+            "--profiles",
+            "-p",
+            help="Liste de profils d'inférence à tester, séparés par des virgules",
+        )
+        p.add_argument(
+            "--suites",
+            "-s",
+            help="Suites à exécuter (rag, pii, structured, meeting, conciseness) séparées par des virgules",
+        )
+        p.add_argument(
+            "--output-dir",
+            default=os.path.join(current_dir, "reports"),
+            help="Répertoire de sortie des rapports (défaut: reports/)",
+        )
+        p.add_argument(
+            "--mock",
+            action="store_true",
+            help="Mode simulation déterministe (aucun serveur LLM actif requis)",
+        )
+        p.add_argument(
+            "--verbose",
+            "-v",
+            action="store_true",
+            help="Affichage détaillé des assertions en console",
+        )
+
+    # If argv has 'init', use parsed command. Otherwise default to 'run'.
+    if len(sys.argv) > 1 and sys.argv[1] == "init":
+        args = parser.parse_args()
+        execute_init(args)
+    elif len(sys.argv) > 1 and sys.argv[1] == "run":
+        args = parser.parse_args()
+        execute_run(args)
+    else:
+        # Default fallback to run with top-level flags (e.g. `benchmark.py --mock`)
+        args = parser.parse_args()
+        execute_run(args)
 
 
 if __name__ == "__main__":
