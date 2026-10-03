@@ -346,12 +346,14 @@
           if (!text.trim()) throw new Error('Le presse-papier est vide');
 
           const action = cmd.replace('/', '');
+          console.debug(`[QuickAccess:AI] Action '${action}' déclenchée sur le presse-papier (taille=${text.length} cars) avec param='${arg}'`);
           const res = await invoke<string>('ai_process_clipboard', {
             action,
             text,
             param: arg || undefined,
           });
 
+          console.info(`[QuickAccess:AI] Réponse reçue (${res.length} cars) :`, res);
           aiOutput = res;
           await copyToClipboard(res, `Résultat IA copié dans le presse-papier !`);
           notifyUser(`IA (${action}) : Résultat généré et copié !`);
@@ -360,7 +362,9 @@
 
         case '/ask': {
           if (!arg) throw new Error('Question requise');
+          console.debug(`[QuickAccess:RAG] Question posée au coffre : '${arg}'`);
           const answer = await invoke<string>('ask_vault', { question: arg });
+          console.info(`[QuickAccess:RAG] Réponse reçue (${answer.length} cars) :`, answer);
           aiOutput = answer;
           await adjustWindowSize(400);
           break;
@@ -373,6 +377,7 @@
           break;
       }
     } catch (err: unknown) {
+      console.warn(`[QuickAccess] Erreur lors de l'exécution de '${cmd}' :`, err);
       statusMessage = `Erreur : ${String(err)}`;
     } finally {
       isLoading = false;

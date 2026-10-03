@@ -14,9 +14,15 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot
 $DesktopDir = Join-Path $ProjectRoot "apps\desktop"
 
+# Activation du mode DEBUG par défaut pour un diagnostic complet
+$env:RUST_LOG = "debug,jeanne_core=debug,jeanne_desktop=debug,tauri=info"
+$env:RUST_BACKTRACE = "1"
+$env:VITE_DEBUG = "true"
+
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "    Jeanne — Assistant IA Souverain       " -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host " [MODE DEBUG ACTIF] RUST_LOG=$($env:RUST_LOG)" -ForegroundColor Green
 
 # 1. Vérification des prérequis
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {

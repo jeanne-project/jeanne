@@ -278,29 +278,47 @@ async fn load_local_model(
     model_path: Option<String>,
 ) -> Result<(), String> {
     tracing::info!(
-        "Demande de chargement du modèle local : path={:?}",
+        ">>> [IPC:load_local_model] Demande de chargement reçue : path={:?}",
         model_path
     );
+    let start = std::time::Instant::now();
     let result = state
         .local_engine
         .load_model(model_path)
         .await
         .map_err(|e| e.to_string());
+
     match &result {
-        Ok(()) => tracing::info!("Modèle local chargé avec succès."),
-        Err(e) => tracing::warn!("Échec du chargement du modèle local : {}", e),
+        Ok(()) => {
+            let elapsed = start.elapsed();
+            let stats = state.local_engine.get_stats().await;
+            tracing::info!(
+                ">>> [IPC:load_local_model] Succès : modèle chargé en {} ms. RAM allouée = {} Mo.",
+                elapsed.as_millis(),
+                stats.memory_allocated_mb
+            );
+        }
+        Err(e) => {
+            tracing::warn!(">>> [IPC:load_local_model] Échec du chargement : {}", e);
+        }
     }
     result
 }
 
 #[tauri::command]
 async fn unload_local_model(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    tracing::info!("Demande de déchargement du modèle local.");
-    state
+    tracing::info!(">>> [IPC:unload_local_model] Demande de déchargement du modèle.");
+    let res = state
         .local_engine
         .unload_model()
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    if res.is_ok() {
+        tracing::info!(
+            ">>> [IPC:unload_local_model] Modèle déchargé avec succès. Mémoire libérée."
+        );
+    }
+    res
 }
 
 #[tauri::command]
@@ -468,6 +486,21 @@ async fn ai_process_clipboard(
         _ => return Err(format!("Action IA inconnue : '{action}'")),
     };
 
+    tracing::info!(
+        ">>> [IPC:ai_process_clipboard] Action='{}', Param='{:?}', Taille texte={} caractères",
+        action,
+        param,
+        clean_text.len()
+    );
+    tracing::debug!(
+        ">>> [IPC:ai_process_clipboard] Texte source : {:?}",
+        clean_text
+    );
+    tracing::debug!(
+        ">>> [IPC:ai_process_clipboard] Prompt envoyé : {:?}",
+        prompt
+    );
+
     let cancel = CancellationToken::new();
     let mut rx = state
         .local_engine
@@ -480,7 +513,13 @@ async fn ai_process_clipboard(
         result.push_str(&token);
     }
 
-    Ok(result.trim().to_string())
+    let final_res = result.trim().to_string();
+    tracing::info!(
+        ">>> [IPC:ai_process_clipboard] Réponse finale générée ({} caractères) : {:?}",
+        final_res.len(),
+        final_res
+    );
+    Ok(final_res)
 }
 
 #[tauri::command]
@@ -576,8 +615,22 @@ where
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt::init();
-    tracing::info!("Démarrage du client Jeanne Desktop...");
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new(
+            "debug,jeanne_core=debug,jeanne_desktop=debug,tauri=info",
+        )
+    });
+
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_target(true)
+        .with_file(true)
+        .with_line_number(true)
+        .init();
+
+    tracing::info!("============================================================");
+    tracing::info!("  Démarrage du client Jeanne Desktop (Mode DEBUG configuré) ");
+    tracing::info!("============================================================");
 
     if let Err(err) = tauri::Builder::default()
         .plugin(
