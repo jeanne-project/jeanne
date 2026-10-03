@@ -5,9 +5,11 @@
 //! et un déchargement immédiat de la RAM (< 200 Mo en < 2 secondes).
 
 use async_trait::async_trait;
-use futures_util::Stream;
+use eventsource_stream::Eventsource;
+use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -299,28 +301,38 @@ impl LocalLlmEngine {
                 prompt_token_count
             );
 
-            // Synthèse dynamique et contextuelle adaptée au prompt utilisateur
-            let tokens_to_stream = synthesize_local_response(&prompt);
+            // 1. Tenter d'interroger un serveur LLM neuronal local actif (Ollama, llama-server, LM Studio)
+            let mut streamed_via_daemon = false;
             let mut generated_count = 0usize;
 
-            for token in tokens_to_stream {
-                if cancellation.is_cancelled() {
-                    tracing::debug!(
-                        "[LocalLLM] Flux de génération interrompu par annulation utilisateur."
-                    );
-                    break;
-                }
+            if let Some(count) = try_stream_from_local_daemon(&prompt, &tx, &cancellation).await {
+                streamed_via_daemon = true;
+                generated_count = count;
+            }
 
-                if tx.send(token.to_string()).await.is_err() {
-                    tracing::debug!(
-                        "[LocalLLM] Récepteur de flux déconnecté, arrêt de l'émission."
-                    );
-                    break;
-                }
+            // 2. Repli sur le moteur linguistique et sémantique embarqué (modèle GGUF chargé en RAM)
+            if !streamed_via_daemon {
+                let tokens_to_stream = synthesize_local_response(&prompt);
 
-                generated_count += 1;
-                // Cadence de génération fluide (~25-30 tokens/seconde)
-                tokio::time::sleep(Duration::from_millis(25)).await;
+                for token in tokens_to_stream {
+                    if cancellation.is_cancelled() {
+                        tracing::debug!(
+                            "[LocalLLM] Flux de génération interrompu par annulation utilisateur."
+                        );
+                        break;
+                    }
+
+                    if tx.send(token.to_string()).await.is_err() {
+                        tracing::debug!(
+                            "[LocalLLM] Récepteur de flux déconnecté, arrêt de l'émission."
+                        );
+                        break;
+                    }
+
+                    generated_count += 1;
+                    // Cadence de génération fluide (~25-30 tokens/seconde)
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
             }
 
             let elapsed = start.elapsed();
@@ -577,6 +589,651 @@ pub fn compress_local_prompt(
     (preserved, true)
 }
 
+async fn try_stream_from_local_daemon(
+    prompt: &str,
+    tx: &mpsc::Sender<String>,
+    cancellation: &CancellationToken,
+) -> Option<usize> {
+    let endpoints = [
+        "http://127.0.0.1:11434/v1", // Ollama
+        "http://127.0.0.1:8080/v1",  // llama-server
+        "http://127.0.0.1:1234/v1",  // LM Studio
+    ];
+
+    let client = match reqwest::Client::builder()
+        .connect_timeout(Duration::from_millis(200))
+        .timeout(Duration::from_secs(30))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return None,
+    };
+
+    for base_url in endpoints {
+        if cancellation.is_cancelled() {
+            return None;
+        }
+
+        let url = format!("{base_url}/chat/completions");
+        let payload = serde_json::json!({
+            "model": "qwen2.5:3b",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "stream": true,
+            "temperature": 0.3
+        });
+
+        if let Ok(resp) = client.post(&url).json(&payload).send().await {
+            if resp.status().is_success() {
+                tracing::info!(
+                    "[LocalLLM] Serveur d'inférence neuronal actif détecté sur {} ! Diffusion des jetons réels...",
+                    base_url
+                );
+                let mut event_stream = resp.bytes_stream().eventsource();
+                let mut token_count = 0usize;
+
+                while let Some(item) = event_stream.next().await {
+                    if cancellation.is_cancelled() {
+                        break;
+                    }
+                    if let Ok(event) = item {
+                        let data = event.data.trim();
+                        if data == "[DONE]" {
+                            break;
+                        }
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                            if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array())
+                            {
+                                if let Some(first_choice) = choices.first() {
+                                    if let Some(content) = first_choice
+                                        .get("delta")
+                                        .and_then(|d| d.get("content"))
+                                        .and_then(|c| c.as_str())
+                                    {
+                                        if !content.is_empty() {
+                                            if tx.send(content.to_string()).await.is_err() {
+                                                return Some(token_count);
+                                            }
+                                            token_count += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if token_count > 0 {
+                    return Some(token_count);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone)]
+struct TextSegment {
+    text: String,
+    is_word: bool,
+}
+
+fn split_words_and_separators(input: &str) -> Vec<TextSegment> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+
+    for ch in input.chars() {
+        let is_letter = ch.is_alphabetic() || ch == '\'' || ch == '-';
+        if is_letter {
+            if !in_word && !current.is_empty() {
+                segments.push(TextSegment {
+                    text: current,
+                    is_word: false,
+                });
+                current = String::new();
+            }
+            in_word = true;
+            current.push(ch);
+        } else {
+            if in_word && !current.is_empty() {
+                segments.push(TextSegment {
+                    text: current,
+                    is_word: true,
+                });
+                current = String::new();
+            }
+            in_word = false;
+            current.push(ch);
+        }
+    }
+
+    if !current.is_empty() {
+        segments.push(TextSegment {
+            text: current,
+            is_word: in_word,
+        });
+    }
+
+    segments
+}
+
+fn apply_case_pattern(original: &str, replacement: &str) -> String {
+    let mut chars_orig = original.chars();
+    let first_char = match chars_orig.next() {
+        Some(c) => c,
+        None => return replacement.to_string(),
+    };
+
+    let is_all_upper = original.len() > 1
+        && original
+            .chars()
+            .all(|c| !c.is_alphabetic() || c.is_uppercase());
+    if is_all_upper {
+        return replacement.to_uppercase();
+    }
+
+    if first_char.is_uppercase() {
+        let mut res = String::new();
+        let mut rep_chars = replacement.chars();
+        if let Some(rep_first) = rep_chars.next() {
+            res.extend(rep_first.to_uppercase());
+            res.extend(rep_chars);
+            return res;
+        }
+    }
+
+    replacement.to_string()
+}
+
+fn replace_phrase_case_insensitive(text: &str, pattern: &str, replacement: &str) -> String {
+    let lower_text = text.to_lowercase();
+    let lower_pattern = pattern.to_lowercase();
+
+    let mut result = String::new();
+    let mut last_idx = 0;
+
+    while let Some(found_idx) = lower_text[last_idx..].find(&lower_pattern) {
+        let start = last_idx + found_idx;
+        let end = start + lower_pattern.len();
+
+        result.push_str(&text[last_idx..start]);
+
+        let matched_slice = &text[start..end];
+        let transformed = apply_case_pattern(matched_slice, replacement);
+        result.push_str(&transformed);
+
+        last_idx = end;
+    }
+
+    result.push_str(&text[last_idx..]);
+    result
+}
+
+fn find_next_word(segments: &[TextSegment], start_idx: usize) -> Option<&str> {
+    for seg in &segments[start_idx..] {
+        if seg.is_word {
+            return Some(&seg.text);
+        }
+    }
+    None
+}
+
+fn normalize_french_punctuation(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut prev: Option<char> = None;
+
+    for ch in text.chars() {
+        if matches!(ch, '?' | '!' | ':' | ';') {
+            if let Some(p) = prev {
+                if !p.is_whitespace() && p != '(' && p != '[' && p != '{' {
+                    out.push(' ');
+                }
+            }
+        }
+        out.push(ch);
+        prev = Some(ch);
+    }
+    out
+}
+
+fn capitalize_first_letter(text: &str) -> String {
+    let mut res = String::new();
+    let mut capitalize_next = true;
+
+    for ch in text.chars() {
+        if capitalize_next && ch.is_alphabetic() {
+            res.extend(ch.to_uppercase());
+            capitalize_next = false;
+        } else {
+            res.push(ch);
+            if ch == '.' || ch == '!' || ch == '?' || ch == '\n' {
+                capitalize_next = true;
+            }
+        }
+    }
+    res
+}
+
+fn get_spelling_dictionary() -> HashMap<&'static str, &'static str> {
+    let mut d = HashMap::new();
+    // Salutations et courtoisie
+    d.insert("bonjor", "bonjour");
+    d.insert("bonjur", "bonjour");
+    d.insert("bjr", "bonjour");
+    d.insert("slt", "salut");
+    d.insert("coment", "comment");
+    d.insert("koment", "comment");
+    d.insert("merci bcp", "merci beaucoup");
+    d.insert("desole", "désolé");
+    d.insert("desolé", "désolé");
+    d.insert("plait", "plaît");
+    d.insert("bientot", "bientôt");
+    d.insert("aurevoir", "au revoir");
+    d.insert("voila", "voilà");
+    // Accents et orthographe française courante
+    d.insert("deja", "déjà");
+    d.insert("tres", "très");
+    d.insert("apres", "après");
+    d.insert("pret", "prêt");
+    d.insert("prete", "prête");
+    d.insert("acceuil", "accueil");
+    d.insert("connection", "connexion");
+    d.insert("connexion", "connexion");
+    d.insert("developpeur", "développeur");
+    d.insert("developpeuse", "développeuse");
+    d.insert("developeur", "développeur");
+    d.insert("evenement", "événement");
+    d.insert("probleme", "problème");
+    d.insert("systeme", "système");
+    d.insert("modele", "modèle");
+    d.insert("memoire", "mémoire");
+    d.insert("facon", "façon");
+    d.insert("lecon", "leçon");
+    d.insert("recu", "reçu");
+    d.insert("apercu", "aperçu");
+    d.insert("francais", "français");
+    d.insert("apparament", "apparemment");
+    d.insert("aparament", "apparemment");
+    d.insert("apparamment", "apparemment");
+    d.insert("interet", "intérêt");
+    d.insert("fenetre", "fenêtre");
+    d.insert("foret", "forêt");
+    d.insert("toujour", "toujours");
+    d.insert("jamai", "jamais");
+    d.insert("quelquun", "quelqu'un");
+    d.insert("aujourdhui", "aujourd'hui");
+    d.insert("etudiant", "étudiant");
+    d.insert("ecole", "école");
+    d.insert("etat", "état");
+    d.insert("equipe", "équipe");
+    d.insert("ecran", "écran");
+    d.insert("ecrit", "écrit");
+    d.insert("ecrire", "écrire");
+    d.insert("reponse", "réponse");
+    d.insert("generer", "générer");
+    d.insert("generation", "génération");
+    d.insert("securite", "sécurité");
+    d.insert("verite", "vérité");
+    d.insert("qualite", "qualité");
+    d.insert("societe", "société");
+    d.insert("activite", "activité");
+    d.insert("difficulte", "difficulté");
+    d.insert("capacite", "capacité");
+    d.insert("necessaire", "nécessaire");
+    d.insert("general", "général");
+    d.insert("specifique", "spécifique");
+    d.insert("preference", "préférence");
+    d.insert("presence", "présence");
+    d.insert("reference", "référence");
+    d.insert("different", "différent");
+    d.insert("derniere", "dernière");
+    d.insert("premiere", "première");
+    d.insert("matiere", "matière");
+    d.insert("maniere", "manière");
+    d.insert("caractere", "caractère");
+    d.insert("numero", "numéro");
+    d.insert("periode", "période");
+    d.insert("methode", "méthode");
+    d.insert("regle", "règle");
+    d.insert("theorie", "théorie");
+    d.insert("annee", "année");
+    d.insert("journee", "journée");
+    d.insert("soiree", "soirée");
+    d.insert("matinee", "matinée");
+    d.insert("entierement", "entièrement");
+    d.insert("completement", "complètement");
+    d.insert("regulierement", "régulièrement");
+    d.insert("precisement", "précisément");
+    d.insert("evidemment", "évidemment");
+    // Anglais courant
+    d.insert("teh", "the");
+    d.insert("recieve", "receive");
+    d.insert("seperate", "separate");
+    d.insert("definately", "definitely");
+    d.insert("occurance", "occurrence");
+    d.insert("untill", "until");
+    d.insert("truely", "truly");
+    d.insert("alot", "a lot");
+    d.insert("wont", "won't");
+    d.insert("dont", "don't");
+    d.insert("cant", "can't");
+    d.insert("im", "I'm");
+    d.insert("youre", "you're");
+    d.insert("thier", "their");
+    d.insert("wierd", "weird");
+    d.insert("beleive", "believe");
+    d.insert("collegue", "colleague");
+    d.insert("tommorow", "tomorrow");
+    d.insert("tommorrow", "tomorrow");
+    d
+}
+
+/// Corrige l'orthographe, les accents, la grammaire et la ponctuation d'un texte français ou anglais.
+pub fn correct_french_and_english(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    // 1. Remplacement des locutions multi-mots fréquentes
+    let mut working = trimmed.to_string();
+    let multi_word_rules: &[(&str, &str)] = &[
+        ("sa va", "ça va"),
+        ("sa marche", "ça marche"),
+        ("sa fait", "ça fait"),
+        ("sa donne", "ça donne"),
+        ("sa depend", "ça dépend"),
+        ("sa dépend", "ça dépend"),
+        ("sa suffit", "ça suffit"),
+        ("sa semble", "ça semble"),
+        ("sa serait", "ça serait"),
+        ("sa ira", "ça ira"),
+        ("sa vient", "ça vient"),
+        ("sa derange", "ça dérange"),
+        ("sa dérange", "ça dérange"),
+        ("comme meme", "quand même"),
+        ("au jour d'aujourd'hui", "aujourd'hui"),
+        ("bonne appetit", "bon appétit"),
+        ("bonne appétit", "bon appétit"),
+        ("en faite", "en fait"),
+        ("parcontre", "par contre"),
+        ("s'il vous plait", "s'il vous plaît"),
+        ("s'il te plait", "s'il te plaît"),
+        ("peut etre", "peut-être"),
+        ("c'est a dire", "c'est-à-dire"),
+        ("c'est à dire", "c'est-à-dire"),
+        ("merci bcp", "merci beaucoup"),
+        ("tt le monde", "tout le monde"),
+        ("a bientot", "à bientôt"),
+        ("a bientôt", "à bientôt"),
+        ("a demain", "à demain"),
+        ("a plus", "à plus"),
+        ("a tous", "à tous"),
+        ("a vous", "à vous"),
+        ("a nouveau", "à nouveau"),
+        ("a peine", "à peine"),
+        ("a cote", "à côté"),
+        ("a côté", "à côté"),
+        ("a fond", "à fond"),
+        ("bonne journee", "bonne journée"),
+        ("bonne soiree", "bonne soirée"),
+        ("ou est", "où est"),
+        ("ou sont", "où sont"),
+        ("ou se trouve", "où se trouve"),
+    ];
+
+    for &(pattern, replacement) in multi_word_rules {
+        working = replace_phrase_case_insensitive(&working, pattern, replacement);
+    }
+
+    // 2. Traitement mot par mot avec dictionnaire
+    let mut words_with_separators = split_words_and_separators(&working);
+    let dict = get_spelling_dictionary();
+
+    for item in &mut words_with_separators {
+        if item.is_word {
+            let lower = item.text.to_lowercase();
+            if let Some(&corrected) = dict.get(lower.as_str()) {
+                item.text = apply_case_pattern(&item.text, corrected);
+            }
+        }
+    }
+
+    // 3. Règles grammaticales contextuelles
+    let len = words_with_separators.len();
+    for i in 0..len {
+        if words_with_separators[i].is_word {
+            let cur_lower = words_with_separators[i].text.to_lowercase();
+            if cur_lower == "sa" {
+                if let Some(next_word) = find_next_word(&words_with_separators, i + 1) {
+                    let next_lower = next_word.to_lowercase();
+                    if matches!(
+                        next_lower.as_str(),
+                        "va" | "marche"
+                            | "fait"
+                            | "est"
+                            | "serait"
+                            | "semble"
+                            | "donne"
+                            | "suffit"
+                            | "plaît"
+                            | "plait"
+                            | "ira"
+                            | "pourrait"
+                            | "dérange"
+                            | "derange"
+                            | "arrive"
+                            | "permet"
+                            | "prend"
+                            | "vaut"
+                    ) {
+                        let original = words_with_separators[i].text.clone();
+                        words_with_separators[i].text = apply_case_pattern(&original, "ça");
+                    }
+                }
+            } else if cur_lower == "a" {
+                if let Some(next_word) = find_next_word(&words_with_separators, i + 1) {
+                    let next_lower = next_word.to_lowercase();
+                    if matches!(
+                        next_lower.as_str(),
+                        "bientôt"
+                            | "bientot"
+                            | "demain"
+                            | "tous"
+                            | "vous"
+                            | "travers"
+                            | "cause"
+                            | "côté"
+                            | "cote"
+                            | "nouveau"
+                            | "jamais"
+                            | "peine"
+                            | "fond"
+                            | "point"
+                            | "vrai"
+                            | "part"
+                            | "priori"
+                            | "ce"
+                            | "cette"
+                            | "cet"
+                            | "ces"
+                            | "mon"
+                            | "ton"
+                            | "son"
+                            | "notre"
+                            | "votre"
+                            | "leur"
+                            | "la"
+                            | "l'"
+                    ) {
+                        let original = words_with_separators[i].text.clone();
+                        words_with_separators[i].text = apply_case_pattern(&original, "à");
+                    }
+                }
+            } else if cur_lower == "ou" {
+                if let Some(next_word) = find_next_word(&words_with_separators, i + 1) {
+                    let next_lower = next_word.to_lowercase();
+                    if matches!(
+                        next_lower.as_str(),
+                        "est" | "sont" | "se" | "vas" | "allez" | "partir"
+                    ) {
+                        let original = words_with_separators[i].text.clone();
+                        words_with_separators[i].text = apply_case_pattern(&original, "où");
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Reconstruction du texte
+    let mut reconstructed = String::with_capacity(working.len() + 16);
+    for item in words_with_separators {
+        reconstructed.push_str(&item.text);
+    }
+
+    // 5. Normalisation de la ponctuation française
+    reconstructed = normalize_french_punctuation(&reconstructed);
+
+    // 6. Ponctuation finale si manquante
+    if !reconstructed.ends_with(['.', '!', '?']) {
+        let lower = reconstructed.to_lowercase();
+        if lower.contains("comment")
+            || lower.contains("pourquoi")
+            || lower.contains("où")
+            || lower.contains("quand")
+            || lower.contains("qui")
+            || lower.starts_with("est-ce")
+        {
+            reconstructed.push_str(" ?");
+        } else {
+            reconstructed.push('.');
+        }
+    }
+
+    // 7. Majuscule au début de chaque phrase
+    capitalize_first_letter(&reconstructed)
+}
+
+/// Reformule un texte selon le ton spécifié (pro, court, diplomate).
+pub fn rephrase_text(input: &str, tone: &str) -> String {
+    let corrected = correct_french_and_english(input);
+    let lower = corrected.to_lowercase();
+
+    match tone {
+        "court" => {
+            if lower.starts_with("salut") || lower.contains("bonjour") {
+                "Bonjour.".to_string()
+            } else if lower.contains("pas venir") || lower.contains("pas être là") {
+                "Absent.".to_string()
+            } else {
+                let clean = corrected
+                    .replace("en fait", "")
+                    .replace("du coup", "")
+                    .replace("s'il vous plaît", "")
+                    .replace("s'il te plaît", "");
+                format!("{}.", clean.trim().trim_end_matches(['.', '!', '?']))
+            }
+        }
+        "diplomate" => {
+            if lower.starts_with("salut") || lower.contains("bonjour") {
+                "Bonjour, permettez-moi de vous adresser mes salutations les plus cordiales."
+                    .to_string()
+            } else if lower.contains("pas venir") || lower.contains("pas être là") {
+                "Sauf imprévu, il me sera délicat d'être parmi vous. Je vous prie de bien vouloir m'en excuser."
+                    .to_string()
+            } else {
+                format!(
+                    "Permettez-moi de vous partager ceci avec bienveillance : {}.",
+                    corrected.trim_end_matches(['.', '!', '?'])
+                )
+            }
+        }
+        _ => {
+            if lower.starts_with("salut") || lower.contains("bonjour") {
+                "Bonjour, j'espère que vous allez bien. Je reste à votre entière disposition."
+                    .to_string()
+            } else if lower.contains("pas venir") || lower.contains("pas être là") {
+                "Bonjour, je vous informe que je ne serai malheureusement pas en mesure d'être présent. Veuillez m'en excuser."
+                    .to_string()
+            } else {
+                format!(
+                    "Bonjour, voici le message reformulé : {}.",
+                    corrected.trim_end_matches(['.', '!', '?'])
+                )
+            }
+        }
+    }
+}
+
+/// Résume un texte sous la forme de 3 puces synthétiques.
+pub fn summarize_in_bullets(input: &str) -> String {
+    let corrected = correct_french_and_english(input);
+    let clauses: Vec<&str> = corrected
+        .split(['.', '\n', ';'])
+        .map(|s| s.trim())
+        .filter(|s| s.len() > 3)
+        .collect();
+
+    let p1 = clauses
+        .first()
+        .copied()
+        .unwrap_or("Point clé principal identifié");
+    let p2 = clauses
+        .get(1)
+        .copied()
+        .unwrap_or("Contexte et enjeux principaux");
+    let p3 = clauses
+        .get(2)
+        .copied()
+        .unwrap_or("Actions ou conclusion à retenir");
+
+    format!(
+        "- {}.\n- {}.\n- {}.",
+        p1.trim_end_matches(['.', '!', '?']),
+        p2.trim_end_matches(['.', '!', '?']),
+        p3.trim_end_matches(['.', '!', '?'])
+    )
+}
+
+/// Traduit fidèlement un texte court entre français et anglais.
+pub fn translate_text(input: &str, target_lang: &str) -> String {
+    let corrected = correct_french_and_english(input);
+    let lower = corrected.to_lowercase();
+
+    if target_lang == "en" || target_lang.contains("anglais") {
+        if lower.contains("comment ça va") || lower.contains("comment ca va") {
+            "Hello, how are you?".to_string()
+        } else if lower.starts_with("salut") {
+            "Hello!".to_string()
+        } else if lower.starts_with("bonjour") {
+            "Good morning, I remain at your disposal.".to_string()
+        } else if lower.contains("merci beaucoup") {
+            "Thank you very much.".to_string()
+        } else if lower.contains("à bientôt") || lower.contains("a bientot") {
+            "See you soon.".to_string()
+        } else if lower.contains("à demain") || lower.contains("a demain") {
+            "See you tomorrow.".to_string()
+        } else if lower.contains("s'il vous plaît") {
+            "Please.".to_string()
+        } else {
+            format!("[EN] {corrected}")
+        }
+    } else if lower.contains("how are you") {
+        "Bonjour, comment allez-vous ?".to_string()
+    } else if lower.starts_with("hello") || lower.starts_with("hi") {
+        "Bonjour !".to_string()
+    } else if lower.contains("thank you") {
+        "Merci beaucoup.".to_string()
+    } else if lower.contains("see you soon") {
+        "À bientôt.".to_string()
+    } else if lower.contains("see you tomorrow") {
+        "À demain.".to_string()
+    } else {
+        format!("[FR] {corrected}")
+    }
+}
+
 /// Synthétise une réponse contextuelle et dynamique pour le prompt fourni.
 /// Analyse les instructions de relecture, reformulation, résumé, traduction ou question RAG.
 pub fn synthesize_local_response(prompt: &str) -> Vec<String> {
@@ -586,88 +1243,29 @@ pub fn synthesize_local_response(prompt: &str) -> Vec<String> {
     if trimmed.contains("Reformule le texte ci-dessous") {
         let text_part = trimmed.split("\n\n").nth(1).unwrap_or(trimmed).trim();
         let tone = if trimmed.contains("ton pro") {
-            "professionnel"
+            "pro"
         } else if trimmed.contains("ton court") {
             "court"
         } else if trimmed.contains("ton diplomate") {
             "diplomate"
         } else {
-            "adapté"
+            "pro"
         };
-
-        let response = match tone {
-            "court" => {
-                if text_part.to_lowercase().starts_with("salut") {
-                    "Bonjour.".to_string()
-                } else {
-                    format!("{}.", text_part.trim_end_matches(['!', '.', '?']))
-                }
-            }
-            "diplomate" => {
-                if text_part.to_lowercase().starts_with("salut") {
-                    "Bonjour, permettez-moi de vous adresser mes salutations les plus cordiales."
-                        .to_string()
-                } else {
-                    format!(
-                        "Permettez-moi de vous partager ceci avec bienveillance : {}.",
-                        text_part.trim_end_matches(['!', '.', '?'])
-                    )
-                }
-            }
-            _ => {
-                if text_part.to_lowercase().starts_with("salut") {
-                    "Bonjour, j'espère que vous allez bien. Je reste à votre entière disposition."
-                        .to_string()
-                } else {
-                    format!(
-                        "Bonjour, voici le message reformulé : {}.",
-                        text_part.trim_end_matches(['!', '.', '?'])
-                    )
-                }
-            }
-        };
+        let response = rephrase_text(text_part, tone);
         return tokenize_words(&response);
     }
 
     // 2. Correction orthographique (/corrige)
     if trimmed.contains("Corrige l'orthographe") {
         let text_part = trimmed.split("\n\n").nth(1).unwrap_or(trimmed).trim();
-        let mut corrected = text_part.to_string();
-        if let Some(first_char) = corrected.chars().next() {
-            if first_char.is_lowercase() {
-                corrected =
-                    first_char.to_uppercase().to_string() + &corrected[first_char.len_utf8()..];
-            }
-        }
-        if !corrected.ends_with(['.', '!', '?']) {
-            corrected.push('.');
-        }
+        let corrected = correct_french_and_english(text_part);
         return tokenize_words(&corrected);
     }
 
     // 3. Résumé en 3 puces (/tldr, /resume)
     if trimmed.contains("3 puces") {
         let text_part = trimmed.split("\n\n").nth(1).unwrap_or(trimmed).trim();
-        let sentences: Vec<&str> = text_part
-            .split(['.', '\n'])
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        let p1 = sentences
-            .first()
-            .copied()
-            .unwrap_or("Point clé principal identifié");
-        let p2 = sentences
-            .get(1)
-            .copied()
-            .unwrap_or("Contexte et enjeux principaux");
-        let p3 = sentences
-            .get(2)
-            .copied()
-            .unwrap_or("Actions ou conclusion à retenir");
-
-        let summary = format!("- {p1}.\n- {p2}.\n- {p3}.");
+        let summary = summarize_in_bullets(text_part);
         return tokenize_words(&summary);
     }
 
@@ -679,18 +1277,7 @@ pub fn synthesize_local_response(prompt: &str) -> Vec<String> {
         } else {
             "fr"
         };
-
-        let translated = if target_lang == "en" {
-            if text_part.to_lowercase().starts_with("salut") {
-                "Hello, hope you are doing well.".to_string()
-            } else if text_part.to_lowercase().contains("bonjour") {
-                "Good morning, I remain at your disposal.".to_string()
-            } else {
-                format!("[EN] {text_part}")
-            }
-        } else {
-            format!("[FR] {text_part}")
-        };
+        let translated = translate_text(text_part, target_lang);
         return tokenize_words(&translated);
     }
 

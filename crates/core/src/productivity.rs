@@ -41,7 +41,7 @@ pub fn sanitize_float_precision(val: f64) -> f64 {
         return val;
     }
     let mag = val.abs().log10().floor() as i32;
-    if !( -15..=15 ).contains(&mag) {
+    if !(-15..=15).contains(&mag) {
         let formatted = format!("{:.12e}", val);
         return formatted.parse::<f64>().unwrap_or(val);
     }
@@ -135,10 +135,15 @@ fn tokenize_math(input: &str) -> Result<Vec<Token>, String> {
             '0'..='9' | '.' | ',' => {
                 let mut num_str = String::new();
                 let mut has_dot = false;
-                while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == ',') {
+                while i < chars.len()
+                    && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == ',')
+                {
                     if chars[i] == '.' || chars[i] == ',' {
                         if has_dot {
-                            return Err("Nombre décimal invalide avec multiples points ou virgules".to_string());
+                            return Err(
+                                "Nombre décimal invalide avec multiples points ou virgules"
+                                    .to_string(),
+                            );
                         }
                         has_dot = true;
                         num_str.push('.');
@@ -576,28 +581,40 @@ mod tests {
     #[test]
     fn test_float_sanitization_user_case() {
         // Cas exact signalé par l'utilisateur
-        let res = evaluate_math_expression("1.2*56.4").unwrap();
-        assert_eq!(res, 67.68);
-        assert_eq!(format_math_result(res), "67.68");
+        if let Ok(res) = evaluate_math_expression("1.2*56.4") {
+            assert_eq!(res, 67.68);
+            assert_eq!(format_math_result(res), "67.68");
+        } else {
+            panic!("Should evaluate 1.2*56.4");
+        }
 
         // Cas avec virgule
-        let res_comma = evaluate_math_expression("1,2*56,4").unwrap();
-        assert_eq!(res_comma, 67.68);
+        if let Ok(res_comma) = evaluate_math_expression("1,2*56,4") {
+            assert_eq!(res_comma, 67.68);
+        } else {
+            panic!("Should evaluate 1,2*56,4");
+        }
 
         // Évaluation détaillée
-        let detailed = evaluate_math_detailed("1.2 * 56.4").unwrap();
-        assert_eq!(detailed.result, 67.68);
-        assert_eq!(detailed.formatted, "67.68");
-        assert_eq!(detailed.expression, "1.2 * 56.4");
+        if let Ok(detailed) = evaluate_math_detailed("1.2 * 56.4") {
+            assert_eq!(detailed.result, 67.68);
+            assert_eq!(detailed.formatted, "67.68");
+            assert_eq!(detailed.expression, "1.2 * 56.4");
+        } else {
+            panic!("Should evaluate detailed 1.2 * 56.4");
+        }
     }
 
     #[test]
     fn test_float_sanitization_edge_cases() {
-        assert_eq!(evaluate_math_expression("0.1 + 0.2").unwrap(), 0.3);
-        assert_eq!(evaluate_math_expression("0.3 - 0.1").unwrap(), 0.2);
-        assert_eq!(evaluate_math_expression("1.15 * 100").unwrap(), 115.0);
-        assert_eq!(evaluate_math_expression("35.7 * 100").unwrap(), 3570.0);
-        assert_eq!(evaluate_math_expression("1.2 * 56.4 - 67.68").unwrap(), 0.0);
-        assert_eq!(evaluate_math_expression("9 ^ 0.5").unwrap(), 3.0);
+        assert_eq!(evaluate_math_expression("0.1 + 0.2").ok(), Some(0.3));
+        assert_eq!(evaluate_math_expression("0.3 - 0.1").ok(), Some(0.2));
+        assert_eq!(evaluate_math_expression("1.15 * 100").ok(), Some(115.0));
+        assert_eq!(evaluate_math_expression("35.7 * 100").ok(), Some(3570.0));
+        assert_eq!(
+            evaluate_math_expression("1.2 * 56.4 - 67.68").ok(),
+            Some(0.0)
+        );
+        assert_eq!(evaluate_math_expression("9 ^ 0.5").ok(), Some(3.0));
     }
 }

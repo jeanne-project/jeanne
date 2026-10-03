@@ -12,8 +12,9 @@ use futures_util::StreamExt;
 use jeanne_core::hardware::detect_hardware;
 use jeanne_core::llm::{ChatMessage, LlmError, LlmProvider};
 use jeanne_core::local_llm::{
-    LocalEngineConfig, LocalLlmEngine, compress_local_prompt, resolve_default_model_dir,
-    validate_gguf_header, verify_model_sha256,
+    LocalEngineConfig, LocalLlmEngine, compress_local_prompt, correct_french_and_english,
+    rephrase_text, resolve_default_model_dir, summarize_in_bullets, synthesize_local_response,
+    translate_text, validate_gguf_header, verify_model_sha256,
 };
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -439,4 +440,93 @@ async fn test_04_14_unloaded_generation_rejection() {
         }
         _ => panic!("Expected LlmError::ModelNotLoaded, got: {:?}", res),
     }
+}
+
+#[test]
+fn test_04_15_spelling_grammar_correction_user_case() {
+    // Cas exact signalé par l'utilisateur
+    let res = correct_french_and_english("Bonjor, coment sa va ?");
+    assert_eq!(
+        res, "Bonjour, comment ça va ?",
+        "Le texte 'Bonjor, coment sa va ?' doit être corrigé en 'Bonjour, comment ça va ?'"
+    );
+
+    // Même cas sans ponctuation
+    let res_no_punct = correct_french_and_english("bonjor coment sa va");
+    assert_eq!(
+        res_no_punct, "Bonjour comment ça va ?",
+        "Le texte 'bonjor coment sa va' doit être corrigé et doté d'une ponctuation d'interrogation"
+    );
+
+    // Autres erreurs fréquentes en français
+    let res_accent = correct_french_and_english("aparament sa marche pas, ou est le probleme ?");
+    assert_eq!(
+        res_accent, "Apparemment ça marche pas, où est le problème ?",
+        "Doit corriger 'aparament', 'sa marche', 'ou est' et 'probleme'"
+    );
+
+    let res_polite = correct_french_and_english("desole je peux pas venir, a bientot !");
+    assert_eq!(
+        res_polite, "Désolé je peux pas venir, à bientôt !",
+        "Doit corriger 'desole' et 'a bientot'"
+    );
+
+    let res_dev =
+        correct_french_and_english("je suis developpeur et j'ai un probleme de connexion.");
+    assert_eq!(
+        res_dev, "Je suis développeur et j'ai un problème de connexion.",
+        "Doit corriger les accents et la majuscule initiale"
+    );
+
+    // Test direct de summarize_in_bullets et translate_text
+    let bullets = summarize_in_bullets("Premier point. Deuxième point. Troisième point.");
+    assert!(bullets.contains("- Premier point"));
+
+    let en_trans = translate_text("Bonjour, comment ça va ?", "en");
+    assert_eq!(en_trans, "Hello, how are you?");
+}
+
+#[test]
+fn test_04_16_rephrase_tones() {
+    let pro = rephrase_text("salut !", "pro");
+    assert!(
+        pro.contains("Bonjour") && pro.contains("entière disposition"),
+        "Le ton pro doit être courtois et formel : got '{}'",
+        pro
+    );
+
+    let court = rephrase_text("salut !", "court");
+    assert_eq!(court, "Bonjour.");
+
+    let diplo = rephrase_text("salut !", "diplomate");
+    assert!(
+        diplo.contains("cordiales"),
+        "Le ton diplomate doit comporter des salutations cordiales : got '{}'",
+        diplo
+    );
+}
+
+#[test]
+fn test_04_17_synthesize_local_response_corrige_action() {
+    let prompt = "Tu es un relecteur professionnel. Corrige l'orthographe, la grammaire, la syntaxe et la ponctuation du texte ci-dessous. Conserve le ton et le format exacts. Renvoie UNIQUEMENT le texte corrigé, sans salutation ni explication :\n\nBonjor, coment sa va ?";
+    let tokens = synthesize_local_response(prompt);
+    let full = tokens.join("");
+    assert_eq!(
+        full, "Bonjour, comment ça va ?",
+        "L'action /corrige doit renvoyer 'Bonjour, comment ça va ?' sans régression"
+    );
+
+    let summary_prompt = "Résume le texte suivant sous forme de 3 puces clés concises commençant par un tiret (-). Renvoie UNIQUEMENT les puces :\n\nPremier point important sur le projet. Ensuite nous avons identifié les risques majeurs. Enfin les prochaines étapes de déploiement.";
+    let summary_tokens = synthesize_local_response(summary_prompt);
+    let summary_full = summary_tokens.join("");
+    assert!(
+        summary_full.contains("- Premier point") && summary_full.contains("-"),
+        "Le résumé doit contenir des puces : got '{}'",
+        summary_full
+    );
+
+    let trad_prompt = "Traduis fidèlement le texte suivant en anglais. Renvoie UNIQUEMENT la traduction sans commentaire :\n\nBonjour, comment ça va ?";
+    let trad_tokens = synthesize_local_response(trad_prompt);
+    let trad_full = trad_tokens.join("");
+    assert_eq!(trad_full, "Hello, how are you?");
 }

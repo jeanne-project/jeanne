@@ -31,7 +31,9 @@ pub use llm::{
 };
 pub use local_llm::{
     GgufMetadata, LoadedModel, LocalEngineConfig, LocalInferenceStats, LocalLlmEngine,
-    compress_local_prompt, resolve_default_model_dir, validate_gguf_header, verify_model_sha256,
+    compress_local_prompt, correct_french_and_english, rephrase_text, resolve_default_model_dir,
+    summarize_in_bullets, synthesize_local_response, translate_text, validate_gguf_header,
+    verify_model_sha256,
 };
 pub use models::{
     CoalaType, FileLink, HybridSearchResult, IndexedChunk, NoteFrontmatter, NoteStatus,
