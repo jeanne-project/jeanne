@@ -2,6 +2,7 @@
 //! et sondage des capacités d'accélération matérielle Vulkan (iGPU / GPU).
 
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "linux")]
 use std::fs;
 use std::path::Path;
 

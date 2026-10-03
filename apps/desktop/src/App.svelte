@@ -11,6 +11,13 @@
   let inferenceStats = $state<LocalInferenceStats | null>(null);
   let isModelLoading = $state(false);
 
+  // Modals
+  let showHelpModal = $state(false);
+  let showModelSetupModal = $state(false);
+  let modelSetupPath = $state('');
+  let modelSetupError = $state('');
+  let pathCopied = $state(false);
+
   const isQuickAccess = $derived(windowLabel === 'quick-access');
 
   async function refreshHardware() {
@@ -32,10 +39,32 @@
         await invoke('load_local_model');
       }
       await refreshHardware();
-    } catch (e) {
-      console.error('Erreur chargement modèle local', e);
+    } catch (e: unknown) {
+      const errMsg = String(e);
+      // Si le modèle est introuvable → afficher le guide d'installation
+      if (errMsg.includes('does not exist') || errMsg.includes('not found') || errMsg.includes('No such file')) {
+        try {
+          modelSetupPath = await invoke<string>('get_default_model_path');
+        } catch {
+          modelSetupPath = '(chemin non disponible)';
+        }
+        modelSetupError = errMsg;
+        showModelSetupModal = true;
+      } else {
+        console.error('Erreur chargement modèle local', e);
+      }
     } finally {
       isModelLoading = false;
+    }
+  }
+
+  async function copyPath() {
+    try {
+      await navigator.clipboard.writeText(modelSetupPath);
+      pathCopied = true;
+      setTimeout(() => { pathCopied = false; }, 2000);
+    } catch {
+      // Fallback si clipboard non disponible
     }
   }
 
@@ -93,6 +122,10 @@
       e.preventDefault();
       handleExitApp();
     }
+    if (e.key === 'Escape') {
+      showHelpModal = false;
+      showModelSetupModal = false;
+    }
   }}
 />
 
@@ -113,6 +146,20 @@
               <kbd>Alt</kbd> + <kbd>Espace</kbd>
             </div>
           </div>
+          <button
+            type="button"
+            class="help-button"
+            onclick={() => { showHelpModal = true; }}
+            title="Guide d'utilisation de Jeanne"
+            aria-label="Ouvrir l'aide"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span>Aide</span>
+          </button>
           <button
             type="button"
             class="quit-button"
@@ -170,6 +217,7 @@
         </div>
         <p class="model-description">
           Exécution souveraine 100% hors-ligne. Modèle cible : <code>Qwen2.5-3B-Instruct-Q4_K_M</code>.
+          Fonctionne sans connexion internet ni envoi de données.
         </p>
         <div class="stats-cards">
           <div class="stat-card">
@@ -178,7 +226,7 @@
           </div>
           <div class="stat-card">
             <span class="stat-label">Accélération Vulkan</span>
-            <span class="stat-value">{hardwareInfo?.vulkan_supported ? 'Actif' : 'Non détecté'}</span>
+            <span class="stat-value">{hardwareInfo?.vulkan_supported ? (hardwareInfo.vulkan_device_name ?? 'Actif') : 'Non détecté'}</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">Empreinte RAM Modèle</span>
@@ -193,12 +241,21 @@
             disabled={isModelLoading}
           >
             {#if isModelLoading}
+              <span class="spinner"></span>
               <span>Opération en cours...</span>
             {:else if hardwareInfo?.recommended_model_loaded}
-              <span>Décharger le Modèle Local (&lt; 200 Mo RAM)</span>
+              <span>Décharger le Modèle (&lt; 200 Mo RAM)</span>
             {:else}
               <span>Charger le Modèle Local (Qwen 3B)</span>
             {/if}
+          </button>
+          <button
+            type="button"
+            class="model-info-btn"
+            onclick={() => { showModelSetupModal = true; invoke<string>('get_default_model_path').then(p => { modelSetupPath = p; modelSetupError = ''; }).catch(() => {}); }}
+            title="Voir les instructions d'installation du modèle"
+          >
+            ℹ️ Guide d'installation
           </button>
         </div>
       </section>
@@ -217,6 +274,161 @@
       </section>
     </div>
   </main>
+{/if}
+
+<!-- ─── Modal : Guide d'installation du modèle ─── -->
+{#if showModelSetupModal}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onclick={() => { showModelSetupModal = false; }}>
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="modal-setup-title">
+      <div class="modal-header">
+        <h2 id="modal-setup-title" class="modal-title">📥 Installation du Modèle Local</h2>
+        <button class="modal-close" onclick={() => { showModelSetupModal = false; }} aria-label="Fermer">✕</button>
+      </div>
+      <div class="modal-body">
+        {#if modelSetupError}
+          <div class="alert-box">
+            <strong>⚠️ Modèle introuvable</strong><br/>
+            Le fichier GGUF n'a pas été trouvé à l'emplacement attendu.
+          </div>
+        {/if}
+
+        <h3 class="setup-step-title">Étape 1 — Télécharger le modèle</h3>
+        <p class="setup-text">Téléchargez le fichier <code>Qwen2.5-3B-Instruct-Q4_K_M.gguf</code> (~2.1 Go) depuis Hugging Face :</p>
+        <a
+          class="download-link"
+          href="https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          🤗 Hugging Face — Qwen2.5-3B-Instruct-Q4_K_M.gguf
+        </a>
+        <p class="setup-hint">Connectez-vous sur Hugging Face si demandé. Téléchargement direct (~2.1 Go).</p>
+
+        <h3 class="setup-step-title">Étape 2 — Placer le fichier</h3>
+        <p class="setup-text">Déposez le fichier <strong>sans renommer</strong> dans le répertoire suivant :</p>
+        <div class="path-box">
+          <code class="path-text">{modelSetupPath || 'Chargement du chemin...'}</code>
+          <button class="copy-btn" onclick={copyPath} title="Copier le chemin">
+            {pathCopied ? '✓ Copié !' : '📋 Copier'}
+          </button>
+        </div>
+        <p class="setup-hint">Créez le dossier <code>models/</code> s'il n'existe pas encore.</p>
+
+        <h3 class="setup-step-title">Étape 3 — Charger dans Jeanne</h3>
+        <p class="setup-text">Cliquez sur <strong>« Charger le Modèle Local (Qwen 3B) »</strong> dans le tableau de bord. Le chargement prend quelques secondes (~2.1 Go en mémoire).</p>
+
+        <div class="setup-requirements">
+          <strong>⚙️ Configuration recommandée :</strong>
+          <ul>
+            <li>RAM : 8 Go disponibles minimum (16 Go total recommandé)</li>
+            <li>GPU : Vulkan compatible (Intel Iris Xe, AMD Radeon, NVIDIA GeForce)</li>
+            <li>Espace disque : ~2.2 Go pour le fichier GGUF</li>
+          </ul>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" onclick={() => { showModelSetupModal = false; }}>Compris, je télécharge</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- ─── Modal : Aide / Documentation utilisateur ─── -->
+{#if showHelpModal}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onclick={() => { showHelpModal = false; }}>
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="modal modal-wide" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="modal-help-title">
+      <div class="modal-header">
+        <h2 id="modal-help-title" class="modal-title">📖 Guide d'utilisation de Jeanne</h2>
+        <button class="modal-close" onclick={() => { showHelpModal = false; }} aria-label="Fermer">✕</button>
+      </div>
+      <div class="modal-body help-body">
+
+        <section class="help-section">
+          <h3 class="help-section-title">🔍 Recherche dans votre coffre de notes</h3>
+          <p>Jeanne indexe automatiquement tous vos fichiers Markdown (<code>.md</code>) dans votre coffre. La recherche combine :</p>
+          <ul>
+            <li><strong>Recherche lexicale BM25</strong> — mots-clés exacts, rapide (&lt; 15 ms)</li>
+            <li><strong>Recherche sémantique vectorielle</strong> — sens et contexte (RAG hybride)</li>
+            <li><strong>Priorité temporelle</strong> — les notes récentes remontent naturellement</li>
+          </ul>
+          <div class="help-tip">Tapez simplement votre requête dans la barre de recherche. Pas besoin de commande spéciale.</div>
+        </section>
+
+        <section class="help-section">
+          <h3 class="help-section-title">⚡ Palette d'Accès Rapide</h3>
+          <p>Invoquez Jeanne depuis <em>n'importe quelle application</em> sans quitter votre contexte de travail :</p>
+          <div class="shortcut-box">
+            <kbd>Alt</kbd> + <kbd>Espace</kbd>
+          </div>
+          <ul>
+            <li>La palette s'ouvre en <strong>moins de 50 ms</strong>, toujours au premier plan</li>
+            <li>Appuyez sur <kbd>Échap</kbd> pour la fermer</li>
+            <li>Raccourci de repli : <kbd>Alt</kbd> + <kbd>Maj</kbd> + <kbd>Espace</kbd></li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h3 class="help-section-title">📝 Capture de Notes Rapides</h3>
+          <p>Depuis la palette ou le tableau de bord, préfixez votre texte avec <code>/note</code> :</p>
+          <div class="code-example"><code>/note Réunion avec Alice — décision : migrer vers Rust</code></div>
+          <p>La note est horodatée automatiquement et indexée immédiatement dans votre coffre Markdown.</p>
+        </section>
+
+        <section class="help-section">
+          <h3 class="help-section-title">🤖 Inférence IA Distante (OpenAI compatible)</h3>
+          <p>Connectez Jeanne à tout endpoint compatible OpenAI (<code>/v1/chat/completions</code>) :</p>
+          <ul>
+            <li>OpenAI GPT-4, Mistral, Groq, LM Studio, Ollama…</li>
+            <li>Réponses en <strong>streaming temps réel</strong></li>
+            <li>Protection automatique des données sensibles (e-mails, téléphones) avant envoi</li>
+            <li>Sources citées : <code>[source: nom_note.md]</code></li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h3 class="help-section-title">🖥️ Inférence IA Locale (100% hors-ligne)</h3>
+          <p>Faites tourner un modèle IA directement sur votre machine, <strong>sans aucune connexion internet</strong> :</p>
+          <ul>
+            <li>Modèle : <code>Qwen2.5-3B-Instruct-Q4_K_M.gguf</code> (~2.1 Go)</li>
+            <li>Accélération matérielle Vulkan (Intel/AMD/NVIDIA)</li>
+            <li>Contexte plafonné à 4096 tokens pour maîtriser la RAM</li>
+            <li>Compression automatique des prompts longs</li>
+            <li>Vos données ne quittent jamais votre machine</li>
+          </ul>
+          <div class="help-tip">
+            Cliquez sur <strong>« Guide d'installation »</strong> dans la section Inférence Locale pour télécharger le modèle.
+          </div>
+        </section>
+
+        <section class="help-section">
+          <h3 class="help-section-title">📁 Philosophie "File-over-App"</h3>
+          <p>Jeanne ne stocke rien dans une base propriétaire. <strong>Vos notes Markdown restent vos fichiers</strong> :</p>
+          <ul>
+            <li>Lisibles dans n'importe quel éditeur (Obsidian, VS Code, Notepad…)</li>
+            <li>L'index SQLite est un <em>cache reconstituable</em> à tout moment</li>
+            <li>Supprimez <code>.jeanne/database.db</code> : Jeanne reconstruit tout au redémarrage</li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h3 class="help-section-title">⌨️ Raccourcis Clavier</h3>
+          <div class="shortcuts-table">
+            <div class="shortcut-row"><kbd>Alt</kbd> + <kbd>Espace</kbd><span>Ouvrir / fermer la palette flottante</span></div>
+            <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>Q</kbd><span>Quitter Jeanne</span></div>
+            <div class="shortcut-row"><kbd>Échap</kbd><span>Fermer la palette / cette fenêtre</span></div>
+          </div>
+        </section>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" onclick={() => { showHelpModal = false; }}>Fermer</button>
+      </div>
+    </div>
+  </div>
 {/if}
 
 <style>
@@ -284,13 +496,11 @@
     flex-wrap: wrap;
   }
 
-  .quit-button {
+  .quit-button,
+  .help-button {
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
-    background: rgba(239, 68, 68, 0.12);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #fca5a5;
     padding: 0.45rem 0.85rem;
     border-radius: 8px;
     font-size: 0.82rem;
@@ -298,6 +508,24 @@
     cursor: pointer;
     font-family: inherit;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+
+  .help-button {
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    color: #c7d2fe;
+  }
+
+  .help-button:hover {
+    background: rgba(99, 102, 241, 0.22);
+    border-color: rgba(99, 102, 241, 0.5);
+    color: #e0e7ff;
+  }
+
+  .quit-button {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
   }
 
   .quit-button:hover {
@@ -403,9 +631,12 @@
   }
 
   .stat-value {
-    font-size: 1.35rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: #f0f6fc;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .overlay-info {
@@ -500,6 +731,7 @@
     margin: 0;
     color: #8b949e;
     font-size: 0.88rem;
+    line-height: 1.5;
   }
 
   .model-description code {
@@ -516,6 +748,7 @@
     padding: 3px 10px;
     border-radius: 20px;
     letter-spacing: 0.02em;
+    white-space: nowrap;
   }
 
   .status-active {
@@ -534,9 +767,14 @@
     display: flex;
     gap: 0.75rem;
     margin-top: 0.25rem;
+    flex-wrap: wrap;
+    align-items: center;
   }
 
   .model-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
     padding: 0.6rem 1.25rem;
     border-radius: 8px;
     font-size: 0.85rem;
@@ -545,6 +783,24 @@
     font-family: inherit;
     transition: all 0.2s ease;
     border: none;
+  }
+
+  .model-info-btn {
+    padding: 0.55rem 1rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    color: #94a3b8;
+    transition: all 0.15s ease;
+  }
+
+  .model-info-btn:hover {
+    background: rgba(148, 163, 184, 0.15);
+    color: #cbd5e1;
   }
 
   .btn-load {
@@ -559,7 +815,7 @@
   .btn-unload {
     background: rgba(239, 68, 68, 0.15);
     color: #fca5a5;
-    border: 1px solid rgba(239, 68, 68, 0.35);
+    border: 1px solid rgba(239, 68, 68, 0.35) !important;
   }
 
   .btn-unload:hover:not(:disabled) {
@@ -569,5 +825,354 @@
   .model-toggle-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  /* Spinner */
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ─── Modals ─── */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+    backdrop-filter: blur(4px);
+  }
+
+  .modal {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 14px;
+    max-width: 560px;
+    width: 100%;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  }
+
+  .modal-wide {
+    max-width: 720px;
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid #30363d;
+    flex-shrink: 0;
+  }
+
+  .modal-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #f0f6fc;
+    margin: 0;
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    color: #8b949e;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+  }
+
+  .modal-close:hover {
+    color: #f0f6fc;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .modal-body {
+    padding: 1.5rem;
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+  }
+
+  .modal-footer {
+    padding: 1rem 1.5rem;
+    border-top: 1px solid #30363d;
+    display: flex;
+    justify-content: flex-end;
+    flex-shrink: 0;
+  }
+
+  .btn-primary {
+    background: #4f46e5;
+    color: #fff;
+    border: none;
+    padding: 0.6rem 1.4rem;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s;
+  }
+
+  .btn-primary:hover {
+    background: #4338ca;
+  }
+
+  /* Setup modal */
+  .alert-box {
+    background: rgba(234, 179, 8, 0.1);
+    border: 1px solid rgba(234, 179, 8, 0.35);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    font-size: 0.88rem;
+    color: #fde68a;
+    line-height: 1.5;
+  }
+
+  .setup-step-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #f0f6fc;
+    margin: 0;
+  }
+
+  .setup-text {
+    margin: 0;
+    font-size: 0.88rem;
+    color: #c9d1d9;
+    line-height: 1.5;
+  }
+
+  .setup-text code {
+    background: rgba(99, 102, 241, 0.15);
+    color: #c7d2fe;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+
+  .setup-hint {
+    margin: 0;
+    font-size: 0.82rem;
+    color: #6e7681;
+    line-height: 1.4;
+  }
+
+  .setup-hint code {
+    background: rgba(255, 255, 255, 0.06);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  .download-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    color: #86efac;
+    padding: 0.6rem 1rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s;
+    width: fit-content;
+  }
+
+  .download-link:hover {
+    background: rgba(34, 197, 94, 0.18);
+    color: #a7f3d0;
+  }
+
+  .path-box {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #0d1117;
+  }
+
+  .path-text {
+    flex: 1;
+    padding: 0.65rem 0.85rem;
+    font-size: 0.78rem;
+    color: #c7d2fe;
+    word-break: break-all;
+    line-height: 1.5;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+  }
+
+  .copy-btn {
+    background: rgba(99, 102, 241, 0.15);
+    border: none;
+    border-left: 1px solid #30363d;
+    color: #c7d2fe;
+    padding: 0 0.85rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background 0.15s;
+    font-family: inherit;
+  }
+
+  .copy-btn:hover {
+    background: rgba(99, 102, 241, 0.28);
+  }
+
+  .setup-requirements {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    font-size: 0.85rem;
+    color: #c9d1d9;
+  }
+
+  .setup-requirements strong {
+    color: #f0f6fc;
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+
+  .setup-requirements ul {
+    margin: 0;
+    padding-left: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  /* Help modal */
+  .help-body {
+    gap: 0;
+  }
+
+  .help-section {
+    padding: 1rem 0;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.6);
+  }
+
+  .help-section:last-child {
+    border-bottom: none;
+  }
+
+  .help-section-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #f0f6fc;
+    margin: 0 0 0.6rem 0;
+  }
+
+  .help-section p {
+    margin: 0 0 0.6rem 0;
+    font-size: 0.88rem;
+    color: #c9d1d9;
+    line-height: 1.55;
+  }
+
+  .help-section ul {
+    margin: 0 0 0.5rem 0;
+    padding-left: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.88rem;
+    color: #c9d1d9;
+  }
+
+  .help-section code {
+    background: rgba(99, 102, 241, 0.15);
+    color: #c7d2fe;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+
+  .help-section kbd {
+    background: #21262d;
+    color: #f0f6fc;
+    border: 1px solid #484f58;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.85em;
+    font-weight: 600;
+  }
+
+  .help-tip {
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 6px;
+    padding: 0.6rem 0.85rem;
+    font-size: 0.84rem;
+    color: #c7d2fe;
+    margin-top: 0.4rem;
+  }
+
+  .code-example {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 0.65rem 0.85rem;
+    margin: 0.3rem 0;
+  }
+
+  .code-example code {
+    background: none;
+    color: #86efac;
+    padding: 0;
+    font-size: 0.85rem;
+  }
+
+  .shortcuts-table {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .shortcut-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.88rem;
+    color: #c9d1d9;
+  }
+
+  .shortcut-row kbd {
+    background: #21262d;
+    color: #f0f6fc;
+    border: 1px solid #484f58;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .shortcut-row span {
+    color: #8b949e;
+    font-size: 0.85rem;
   }
 </style>

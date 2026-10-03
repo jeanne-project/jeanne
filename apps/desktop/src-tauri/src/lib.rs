@@ -277,15 +277,25 @@ async fn load_local_model(
     state: tauri::State<'_, AppState>,
     model_path: Option<String>,
 ) -> Result<(), String> {
-    state
+    tracing::info!(
+        "Demande de chargement du modèle local : path={:?}",
+        model_path
+    );
+    let result = state
         .local_engine
         .load_model(model_path)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    match &result {
+        Ok(()) => tracing::info!("Modèle local chargé avec succès."),
+        Err(e) => tracing::warn!("Échec du chargement du modèle local : {}", e),
+    }
+    result
 }
 
 #[tauri::command]
 async fn unload_local_model(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    tracing::info!("Demande de déchargement du modèle local.");
     state
         .local_engine
         .unload_model()
@@ -305,6 +315,16 @@ async fn get_local_inference_stats(
     state: tauri::State<'_, AppState>,
 ) -> Result<LocalInferenceStats, String> {
     Ok(state.local_engine.get_stats().await)
+}
+
+/// Retourne le chemin complet attendu du fichier modèle GGUF par défaut.
+/// Utilisé par le frontend pour guider l'utilisateur lors de la configuration initiale.
+#[tauri::command]
+fn get_default_model_path() -> String {
+    jeanne_core::resolve_default_model_dir()
+        .join("Qwen2.5-3B-Instruct-Q4_K_M.gguf")
+        .to_string_lossy()
+        .to_string()
 }
 
 /// Tente d'enregistrer séquentiellement une liste ordonnée de raccourcis candidats.
@@ -365,7 +385,8 @@ pub fn run() {
             load_local_model,
             unload_local_model,
             get_hardware_profile,
-            get_local_inference_stats
+            get_local_inference_stats,
+            get_default_model_path
         ])
         .setup(|app| {
             tracing::info!("Initialisation des sous-systèmes Jeanne Desktop...");
