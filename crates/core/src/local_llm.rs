@@ -14,10 +14,10 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use crate::hardware::{detect_hardware, HardwareInfo};
+use crate::hardware::{HardwareInfo, detect_hardware};
 use crate::llm::{ChatMessage, LlmError, LlmProvider};
 
 /// Métriques et statistiques de performance d'inférence locale.
@@ -239,9 +239,23 @@ impl LocalLlmEngine {
 
             // Génération de tokens
             let sample_tokens = vec![
-                "Jeanne ", "est ", "un ", "assistant ", "de ", "connaissances ",
-                "personnel, ", "frugal ", "et ", "sécurisé, ", "fonctionnant ",
-                "en ", "mode ", "local ", "embarqué ", "avec ", "accélération ",
+                "Jeanne ",
+                "est ",
+                "un ",
+                "assistant ",
+                "de ",
+                "connaissances ",
+                "personnel, ",
+                "frugal ",
+                "et ",
+                "sécurisé, ",
+                "fonctionnant ",
+                "en ",
+                "mode ",
+                "local ",
+                "embarqué ",
+                "avec ",
+                "accélération ",
                 "Vulkan.",
             ];
 
@@ -290,7 +304,9 @@ impl LlmProvider for LocalLlmEngine {
             prompt_builder.push_str(&format!("{}: {}\n", msg.role, msg.content));
         }
 
-        let rx = self.generate_stream(prompt_builder, cancellation_token).await?;
+        let rx = self
+            .generate_stream(prompt_builder, cancellation_token)
+            .await?;
 
         let stream = futures_util::stream::unfold(rx, |mut rx| async move {
             rx.recv().await.map(|token| (Ok(token), rx))
@@ -345,9 +361,9 @@ pub fn validate_gguf_header(path: &Path) -> Result<GgufMetadata, LlmError> {
     let mut reader = BufReader::new(file);
 
     let mut magic = [0u8; 4];
-    reader.read_exact(&mut magic).map_err(|e| {
-        LlmError::ModelIntegrity(format!("Failed to read GGUF magic bytes: {e}"))
-    })?;
+    reader
+        .read_exact(&mut magic)
+        .map_err(|e| LlmError::ModelIntegrity(format!("Failed to read GGUF magic bytes: {e}")))?;
 
     if &magic != b"GGUF" {
         return Err(LlmError::ModelIntegrity(format!(
@@ -357,9 +373,9 @@ pub fn validate_gguf_header(path: &Path) -> Result<GgufMetadata, LlmError> {
     }
 
     let mut version_bytes = [0u8; 4];
-    reader.read_exact(&mut version_bytes).map_err(|e| {
-        LlmError::ModelIntegrity(format!("Failed to read GGUF version: {e}"))
-    })?;
+    reader
+        .read_exact(&mut version_bytes)
+        .map_err(|e| LlmError::ModelIntegrity(format!("Failed to read GGUF version: {e}")))?;
     let version = u32::from_le_bytes(version_bytes);
 
     if version < 2 {
@@ -369,15 +385,15 @@ pub fn validate_gguf_header(path: &Path) -> Result<GgufMetadata, LlmError> {
     }
 
     let mut tensor_count_bytes = [0u8; 8];
-    reader.read_exact(&mut tensor_count_bytes).map_err(|e| {
-        LlmError::ModelIntegrity(format!("Failed to read tensor count: {e}"))
-    })?;
+    reader
+        .read_exact(&mut tensor_count_bytes)
+        .map_err(|e| LlmError::ModelIntegrity(format!("Failed to read tensor count: {e}")))?;
     let tensor_count = u64::from_le_bytes(tensor_count_bytes);
 
     let mut kv_count_bytes = [0u8; 8];
-    reader.read_exact(&mut kv_count_bytes).map_err(|e| {
-        LlmError::ModelIntegrity(format!("Failed to read metadata KV count: {e}"))
-    })?;
+    reader
+        .read_exact(&mut kv_count_bytes)
+        .map_err(|e| LlmError::ModelIntegrity(format!("Failed to read metadata KV count: {e}")))?;
     let metadata_kv_count = u64::from_le_bytes(kv_count_bytes);
 
     Ok(GgufMetadata {
@@ -391,9 +407,8 @@ pub fn validate_gguf_header(path: &Path) -> Result<GgufMetadata, LlmError> {
 
 /// Calcule et vérifie l'empreinte SHA-256 d'un fichier de modèle par streaming par blocs de 64 Ko.
 pub fn verify_model_sha256(path: &Path, expected_hex: &str) -> Result<bool, LlmError> {
-    let file = File::open(path).map_err(|e| {
-        LlmError::LocalEngine(format!("Cannot open model file for SHA-256: {e}"))
-    })?;
+    let file = File::open(path)
+        .map_err(|e| LlmError::LocalEngine(format!("Cannot open model file for SHA-256: {e}")))?;
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 65536];

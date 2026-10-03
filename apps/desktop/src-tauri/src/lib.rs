@@ -294,9 +294,7 @@ async fn unload_local_model(state: tauri::State<'_, AppState>) -> Result<(), Str
 }
 
 #[tauri::command]
-async fn get_hardware_profile(
-    state: tauri::State<'_, AppState>,
-) -> Result<HardwareInfo, String> {
+async fn get_hardware_profile(state: tauri::State<'_, AppState>) -> Result<HardwareInfo, String> {
     let mut hw = state.local_engine.hardware_info().clone();
     hw.recommended_model_loaded = state.local_engine.is_model_loaded().await;
     Ok(hw)

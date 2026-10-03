@@ -12,8 +12,8 @@ use futures_util::StreamExt;
 use jeanne_core::hardware::detect_hardware;
 use jeanne_core::llm::{ChatMessage, LlmError, LlmProvider};
 use jeanne_core::local_llm::{
-    compress_local_prompt, resolve_default_model_dir, validate_gguf_header, verify_model_sha256,
-    LocalEngineConfig, LocalLlmEngine,
+    LocalEngineConfig, LocalLlmEngine, compress_local_prompt, resolve_default_model_dir,
+    validate_gguf_header, verify_model_sha256,
 };
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -45,7 +45,8 @@ fn create_synthetic_gguf_file(extra_bytes: usize) -> (NamedTempFile, String) {
     hasher.update(&bytes);
     let expected_hash = format!("{:x}", hasher.finalize());
 
-    file.write_all(&bytes).expect("Failed to write synthetic GGUF");
+    file.write_all(&bytes)
+        .expect("Failed to write synthetic GGUF");
     file.flush().expect("Failed to flush");
 
     (file, expected_hash)
@@ -63,7 +64,10 @@ async fn test_04_01_memory_ceiling_under_active_generation() {
     };
 
     let engine = LocalLlmEngine::new(config);
-    engine.load_model(None).await.expect("Model should load successfully");
+    engine
+        .load_model(None)
+        .await
+        .expect("Model should load successfully");
 
     assert!(engine.is_model_loaded().await);
     let stats = engine.get_stats().await;
@@ -220,14 +224,20 @@ async fn test_04_06_single_tenant_concurrency_control_returns_busy() {
 
     // Concurrent request while generation is ongoing
     let concurrent_res = engine
-        .generate_stream("Another request concurrently".to_string(), CancellationToken::new())
+        .generate_stream(
+            "Another request concurrently".to_string(),
+            CancellationToken::new(),
+        )
         .await;
 
     match concurrent_res {
         Err(LlmError::Busy(msg)) => {
             assert!(msg.contains("busy"));
         }
-        _ => panic!("Expected LlmError::Busy on concurrent execution, got: {:?}", concurrent_res),
+        _ => panic!(
+            "Expected LlmError::Busy on concurrent execution, got: {:?}",
+            concurrent_res
+        ),
     }
 
     cancel.cancel();
@@ -302,7 +312,10 @@ fn test_04_09_sha256_integrity_verification() {
         Err(LlmError::ModelIntegrity(msg)) => {
             assert!(msg.contains("SHA-256"));
         }
-        _ => panic!("Expected LlmError::ModelIntegrity on hash mismatch, got: {:?}", res),
+        _ => panic!(
+            "Expected LlmError::ModelIntegrity on hash mismatch, got: {:?}",
+            res
+        ),
     }
 }
 
@@ -313,8 +326,10 @@ fn test_04_10_hardware_profile_discovery() {
     assert!(hw.total_system_ram_mb > 0);
     assert!(hw.available_ram_mb > 0);
     // Vulkan detection should return a boolean without panics
-    println!("Hardware detected: total={}MB, available={}MB, vulkan={}, device={:?}",
-        hw.total_system_ram_mb, hw.available_ram_mb, hw.vulkan_supported, hw.vulkan_device_name);
+    println!(
+        "Hardware detected: total={}MB, available={}MB, vulkan={}, device={:?}",
+        hw.total_system_ram_mb, hw.available_ram_mb, hw.vulkan_supported, hw.vulkan_device_name
+    );
 }
 
 #[tokio::test]
@@ -333,7 +348,10 @@ async fn test_04_11_immediate_stream_cancellation() {
 
     let cancel = CancellationToken::new();
     let mut rx = engine
-        .generate_stream("Explain quantum computing in 1000 words".to_string(), cancel.clone())
+        .generate_stream(
+            "Explain quantum computing in 1000 words".to_string(),
+            cancel.clone(),
+        )
         .await
         .expect("Stream should start");
 

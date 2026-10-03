@@ -103,7 +103,8 @@ fn detect_vulkan() -> (bool, Option<String>) {
 
         if found_lib {
             // Lecture du premier GPU Vulkan si accessible ou nom standard
-            let device_name = detect_linux_gpu_name().unwrap_or_else(|| "Vulkan Compatible Graphics Device".to_string());
+            let device_name = detect_linux_gpu_name()
+                .unwrap_or_else(|| "Vulkan Compatible Graphics Device".to_string());
             return (true, Some(device_name));
         }
     }
@@ -138,7 +139,8 @@ fn detect_linux_gpu_name() -> Option<String> {
                             return Some("Intel Iris Xe Graphics (Vulkan)".to_string());
                         } else if line.contains("DRIVER=amdgpu") {
                             return Some("AMD Radeon Graphics (Vulkan)".to_string());
-                        } else if line.contains("DRIVER=nouveau") || line.contains("DRIVER=nvidia") {
+                        } else if line.contains("DRIVER=nouveau") || line.contains("DRIVER=nvidia")
+                        {
                             return Some("NVIDIA GeForce (Vulkan)".to_string());
                         }
                     }
