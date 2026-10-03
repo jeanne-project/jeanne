@@ -2,13 +2,42 @@
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import QuickAccess from './lib/components/QuickAccess.svelte';
-  import type { VaultStats } from './lib/types/ipc';
+  import type { VaultStats, HardwareInfo, LocalInferenceStats } from './lib/types/ipc';
 
   let windowLabel = $state('main');
   let coreVersion = $state('Chargement...');
   let vaultStats = $state<VaultStats | null>(null);
+  let hardwareInfo = $state<HardwareInfo | null>(null);
+  let inferenceStats = $state<LocalInferenceStats | null>(null);
+  let isModelLoading = $state(false);
 
   const isQuickAccess = $derived(windowLabel === 'quick-access');
+
+  async function refreshHardware() {
+    try {
+      hardwareInfo = await invoke<HardwareInfo>('get_hardware_profile');
+      inferenceStats = await invoke<LocalInferenceStats>('get_local_inference_stats');
+    } catch {
+      // Ignoré si mode web pur
+    }
+  }
+
+  async function toggleLocalModel() {
+    if (!hardwareInfo) return;
+    isModelLoading = true;
+    try {
+      if (hardwareInfo.recommended_model_loaded) {
+        await invoke('unload_local_model');
+      } else {
+        await invoke('load_local_model');
+      }
+      await refreshHardware();
+    } catch (e) {
+      console.error('Erreur chargement modèle local', e);
+    } finally {
+      isModelLoading = false;
+    }
+  }
 
   $effect(() => {
     let label = 'main';
@@ -44,6 +73,8 @@
         .catch(() => {
           vaultStats = null;
         });
+
+      refreshHardware();
     }
   });
 
@@ -126,6 +157,49 @@
               {vaultStats?.last_scan_timestamp ? new Date(vaultStats.last_scan_timestamp * 1000).toLocaleTimeString() : 'Jamais'}
             </span>
           </div>
+        </div>
+      </section>
+
+      <!-- Moteur d'Inférence Local (GGUF / Vulkan) -->
+      <section class="model-section" aria-label="Moteur d'inférence local">
+        <div class="model-header">
+          <h2 class="section-title">Inférence Locale (Vulkan / GGUF)</h2>
+          <span class="status-badge {hardwareInfo?.recommended_model_loaded ? 'status-active' : 'status-idle'}">
+            {hardwareInfo?.recommended_model_loaded ? 'Modèle Chargé (3B)' : 'Modèle Déchargé'}
+          </span>
+        </div>
+        <p class="model-description">
+          Exécution souveraine 100% hors-ligne. Modèle cible : <code>Qwen2.5-3B-Instruct-Q4_K_M</code>.
+        </p>
+        <div class="stats-cards">
+          <div class="stat-card">
+            <span class="stat-label">RAM Système (Dispo / Total)</span>
+            <span class="stat-value">{hardwareInfo ? `${Math.round(hardwareInfo.available_ram_mb / 1024)}G / ${Math.round(hardwareInfo.total_system_ram_mb / 1024)}G` : '...'}</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Accélération Vulkan</span>
+            <span class="stat-value">{hardwareInfo?.vulkan_supported ? 'Actif' : 'Non détecté'}</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Empreinte RAM Modèle</span>
+            <span class="stat-value">{inferenceStats?.memory_allocated_mb ?? 0} Mo</span>
+          </div>
+        </div>
+        <div class="model-actions">
+          <button
+            type="button"
+            class="model-toggle-btn {hardwareInfo?.recommended_model_loaded ? 'btn-unload' : 'btn-load'}"
+            onclick={toggleLocalModel}
+            disabled={isModelLoading}
+          >
+            {#if isModelLoading}
+              <span>Opération en cours...</span>
+            {:else if hardwareInfo?.recommended_model_loaded}
+              <span>Décharger le Modèle Local (&lt; 200 Mo RAM)</span>
+            {:else}
+              <span>Charger le Modèle Local (Qwen 3B)</span>
+            {/if}
+          </button>
         </div>
       </section>
 
@@ -402,5 +476,98 @@
     font-family: inherit;
     font-size: 0.85em;
     font-weight: 600;
+  }
+
+  .model-section {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    grid-column: 1 / -1;
+  }
+
+  .model-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .model-description {
+    margin: 0;
+    color: #8b949e;
+    font-size: 0.88rem;
+  }
+
+  .model-description code {
+    background: rgba(99, 102, 241, 0.15);
+    color: #c7d2fe;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+
+  .status-badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: 0.02em;
+  }
+
+  .status-active {
+    background: rgba(34, 197, 94, 0.18);
+    color: #86efac;
+    border: 1px solid rgba(34, 197, 94, 0.35);
+  }
+
+  .status-idle {
+    background: rgba(148, 163, 184, 0.12);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+  }
+
+  .model-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+  }
+
+  .model-toggle-btn {
+    padding: 0.6rem 1.25rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+    border: none;
+  }
+
+  .btn-load {
+    background: #4f46e5;
+    color: #ffffff;
+  }
+
+  .btn-load:hover:not(:disabled) {
+    background: #4338ca;
+  }
+
+  .btn-unload {
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+  }
+
+  .btn-unload:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.25);
+  }
+
+  .model-toggle-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

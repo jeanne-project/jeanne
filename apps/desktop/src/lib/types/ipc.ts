@@ -14,10 +14,29 @@ export interface VaultStats {
   last_scan_timestamp: number;
 }
 
+export interface HardwareInfo {
+  total_system_ram_mb: number;
+  available_ram_mb: number;
+  vulkan_device_name: string | null;
+  vulkan_supported: boolean;
+  recommended_model_loaded: boolean;
+}
+
+export interface LocalInferenceStats {
+  prompt_tokens: number;
+  generated_tokens: number;
+  tokens_per_second: number;
+  memory_allocated_mb: number;
+}
+
 export interface IpcCommands {
   search_notes(query: string, limit?: number): Promise<SearchResult[]>;
   capture_quick_note(content: string): Promise<string>;
   open_note_in_editor(file_path: string): Promise<void>;
   get_vault_stats(): Promise<VaultStats>;
   exit_app(): Promise<void>;
+  load_local_model(model_path?: string): Promise<void>;
+  unload_local_model(): Promise<void>;
+  get_hardware_profile(): Promise<HardwareInfo>;
+  get_local_inference_stats(): Promise<LocalInferenceStats>;
 }

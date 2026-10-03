@@ -13,7 +13,11 @@
     "allow-get-vault-stats",
     "allow-get-core-version",
     "allow-set-quick-access-height",
-    "allow-exit-app"
+    "allow-exit-app",
+    "allow-load-local-model",
+    "allow-unload-local-model",
+    "allow-get-hardware-profile",
+    "allow-get-local-inference-stats"
   ]
 }
 

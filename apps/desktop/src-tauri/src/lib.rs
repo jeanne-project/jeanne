@@ -6,14 +6,17 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::io::AsyncWriteExt;
 
 use jeanne_core::{
-    IndexedChunk, NoteFrontmatter, SearchResult, StorageManager, VaultStats, VaultWatcher,
+    HardwareInfo, IndexedChunk, LocalEngineConfig, LocalInferenceStats, LocalLlmEngine,
+    NoteFrontmatter, SearchResult, StorageManager, VaultStats, VaultWatcher,
 };
 
-/// État applicatif partagé contenant l'accès sécurisé au moteur SQLite et le chemin racine du coffre.
+/// État applicatif partagé contenant l'accès sécurisé au moteur SQLite, le chemin racine du coffre
+/// et le moteur d'inférence local single-tenant.
 pub struct AppState {
     pub storage: Arc<Mutex<StorageManager>>,
     pub vault_path: PathBuf,
     pub watcher: Mutex<Option<VaultWatcher>>,
+    pub local_engine: Arc<LocalLlmEngine>,
 }
 
 #[tauri::command]
@@ -269,6 +272,43 @@ fn exit_app(app: tauri::AppHandle) {
     clean_exit(&app);
 }
 
+#[tauri::command]
+async fn load_local_model(
+    state: tauri::State<'_, AppState>,
+    model_path: Option<String>,
+) -> Result<(), String> {
+    state
+        .local_engine
+        .load_model(model_path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn unload_local_model(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state
+        .local_engine
+        .unload_model()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_hardware_profile(
+    state: tauri::State<'_, AppState>,
+) -> Result<HardwareInfo, String> {
+    let mut hw = state.local_engine.hardware_info().clone();
+    hw.recommended_model_loaded = state.local_engine.is_model_loaded().await;
+    Ok(hw)
+}
+
+#[tauri::command]
+async fn get_local_inference_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<LocalInferenceStats, String> {
+    Ok(state.local_engine.get_stats().await)
+}
+
 /// Tente d'enregistrer séquentiellement une liste ordonnée de raccourcis candidats.
 /// Retourne le premier raccourci ayant réussi son enregistrement auprès du système.
 pub fn register_first_available_shortcut<F>(
@@ -323,7 +363,11 @@ pub fn run() {
             open_note_in_editor,
             get_vault_stats,
             set_quick_access_height,
-            exit_app
+            exit_app,
+            load_local_model,
+            unload_local_model,
+            get_hardware_profile,
+            get_local_inference_stats
         ])
         .setup(|app| {
             tracing::info!("Initialisation des sous-systèmes Jeanne Desktop...");
@@ -378,10 +422,13 @@ pub fn run() {
                 );
             }
 
+            let local_engine = Arc::new(LocalLlmEngine::new(LocalEngineConfig::default()));
+
             app.manage(AppState {
                 storage: storage_arc,
                 vault_path,
                 watcher: Mutex::new(Some(watcher)),
+                local_engine,
             });
 
             // Enregistrement du raccourci global avec repli en cascade
@@ -519,10 +566,12 @@ mod tests {
         let storage = StorageManager::open(&db_path).expect("open storage");
         storage.init_schema().expect("init schema");
 
+        let local_engine = Arc::new(LocalLlmEngine::new(LocalEngineConfig::default()));
         let app_state = AppState {
             storage: Arc::new(Mutex::new(storage)),
             vault_path: temp_dir.path().to_path_buf(),
             watcher: Mutex::new(None),
+            local_engine: local_engine.clone(),
         };
 
         // Test insertion manuelle et recherche
@@ -684,5 +733,30 @@ mod tests {
         let chosen =
             register_first_available_shortcut(&candidates, |_| Err("All conflicts".into()));
         assert_eq!(chosen, None);
+    }
+
+    #[tokio::test]
+    async fn test_desktop_local_llm_state_and_profile() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("test.db");
+        let storage = StorageManager::open(&db_path).expect("open storage");
+        storage.init_schema().expect("init schema");
+
+        let local_engine = Arc::new(LocalLlmEngine::new(LocalEngineConfig::default()));
+        let app_state = AppState {
+            storage: Arc::new(Mutex::new(storage)),
+            vault_path: temp_dir.path().to_path_buf(),
+            watcher: Mutex::new(None),
+            local_engine: local_engine.clone(),
+        };
+
+        let hw = app_state.local_engine.hardware_info();
+        assert!(hw.total_system_ram_mb > 0);
+        assert!(!app_state.local_engine.is_model_loaded().await);
+
+        let stats = app_state.local_engine.get_stats().await;
+        assert_eq!(stats.memory_allocated_mb, 0);
+
+        assert!(app_state.local_engine.unload_model().await.is_ok());
     }
 }

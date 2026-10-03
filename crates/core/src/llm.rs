@@ -25,6 +25,16 @@ pub enum LlmError {
     Config(String),
     #[error("Stream error: {0}")]
     Stream(String),
+    #[error("Local inference engine is currently busy: {0}")]
+    Busy(String),
+    #[error("Model not loaded: {0}")]
+    ModelNotLoaded(String),
+    #[error("Model integrity verification failed: {0}")]
+    ModelIntegrity(String),
+    #[error("Hardware or Vulkan acceleration error: {0}")]
+    Hardware(String),
+    #[error("Local engine internal error: {0}")]
+    LocalEngine(String),
 }
 
 impl PartialEq for LlmError {
@@ -45,6 +55,11 @@ impl PartialEq for LlmError {
             (Self::Keyring(s1), Self::Keyring(s2)) => s1 == s2,
             (Self::Config(s1), Self::Config(s2)) => s1 == s2,
             (Self::Stream(s1), Self::Stream(s2)) => s1 == s2,
+            (Self::Busy(s1), Self::Busy(s2)) => s1 == s2,
+            (Self::ModelNotLoaded(s1), Self::ModelNotLoaded(s2)) => s1 == s2,
+            (Self::ModelIntegrity(s1), Self::ModelIntegrity(s2)) => s1 == s2,
+            (Self::Hardware(s1), Self::Hardware(s2)) => s1 == s2,
+            (Self::LocalEngine(s1), Self::LocalEngine(s2)) => s1 == s2,
             (Self::Serialization(e1), Self::Serialization(e2)) => e1.to_string() == e2.to_string(),
             (Self::Network(e1), Self::Network(e2)) => e1.to_string() == e2.to_string(),
             _ => false,
