@@ -1,15 +1,14 @@
+use jeanne_core::{
+    CancellationToken, HardwareInfo, IndexedChunk, LocalEngineConfig, LocalInferenceStats,
+    LocalLlmEngine, NoteFrontmatter, SearchResult, SnippetItem, StorageManager, TaskItem,
+    VaultStats, VaultWatcher,
+};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::io::AsyncWriteExt;
-use tokio_util::sync::CancellationToken;
-
-use jeanne_core::{
-    HardwareInfo, IndexedChunk, LocalEngineConfig, LocalInferenceStats, LocalLlmEngine,
-    NoteFrontmatter, SearchResult, SnippetItem, StorageManager, TaskItem, VaultStats, VaultWatcher,
-};
 
 /// État applicatif partagé contenant l'accès sécurisé au moteur SQLite, le chemin racine du coffre
 /// et le moteur d'inférence local single-tenant.
