@@ -28,7 +28,9 @@
     "allow-get-snippets",
     "allow-evaluate-math",
     "allow-ai-process-clipboard",
-    "allow-ask-vault"
+    "allow-ask-vault",
+    "allow-list-available-models",
+    "allow-get-models-directory"
   ]
 }
 

@@ -2,6 +2,7 @@ pub mod error;
 pub mod hardware;
 pub mod llm;
 pub mod local_llm;
+pub mod model_discovery;
 pub mod models;
 pub mod parser;
 pub mod pii;
@@ -9,6 +10,12 @@ pub mod productivity;
 pub mod rag;
 pub mod storage;
 pub mod vault;
+
+pub use model_discovery::{
+    DiscoveredModel, discover_models, discover_models_in_dirs, format_file_size,
+    get_candidate_model_dirs, guess_architecture_from_name, resolve_model_path,
+    resolve_model_path_in_dirs,
+};
 
 pub use productivity::{
     MathEvaluationResult, SnippetItem, TaskItem, append_bookmark, append_log_entry, append_todo,

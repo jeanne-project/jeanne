@@ -125,6 +125,12 @@ impl LocalLlmEngine {
         state.is_some()
     }
 
+    /// Retourne le chemin complet du modèle actuellement chargé, s'il y en a un.
+    pub async fn loaded_model_path(&self) -> Option<String> {
+        let state = self.state.lock().await;
+        state.as_ref().map(|m| m.model_path.clone())
+    }
+
     /// Récupère un instantané des statistiques d'inférence.
     pub async fn get_stats(&self) -> LocalInferenceStats {
         let stats = self.stats.lock().await;
@@ -133,16 +139,15 @@ impl LocalLlmEngine {
 
     /// Charge le modèle GGUF spécifié ou celui par défaut avec validation d'en-tête et SHA-256.
     pub async fn load_model(&self, model_path: Option<String>) -> Result<(), LlmError> {
-        let path_str = model_path
-            .or_else(|| self.config.model_path.clone())
-            .unwrap_or_else(|| {
-                let dir = resolve_default_model_dir();
-                dir.join("Qwen2.5-3B-Instruct-Q4_K_M.gguf")
-                    .to_string_lossy()
-                    .to_string()
-            });
+        let path = match model_path.as_deref().or(self.config.model_path.as_deref()) {
+            Some(req) => crate::model_discovery::resolve_model_path(Some(req)),
+            None => crate::model_discovery::resolve_model_path(None),
+        }
+        .unwrap_or_else(|| {
+            let dir = resolve_default_model_dir();
+            dir.join("qwen2.5-3b-instruct-q4_k_m.gguf")
+        });
 
-        let path = Path::new(&path_str);
         if !path.exists() {
             return Err(LlmError::LocalEngine(format!(
                 "Model file does not exist: {}",
@@ -151,18 +156,22 @@ impl LocalLlmEngine {
         }
 
         // 1. Validation de l'en-tête GGUF
-        let metadata = validate_gguf_header(path)?;
+        let metadata = validate_gguf_header(&path)?;
 
         // 2. Vérification d'intégrité SHA-256 si configurée
         if let Some(expected_hash) = &self.config.expected_sha256 {
-            verify_model_sha256(path, expected_hash)?;
+            verify_model_sha256(&path, expected_hash)?;
         }
 
-        // Empreinte mémoire cible pour un modèle 3B Q4_K_M (~2.1 Go poids + buffer KV context)
-        let simulated_footprint_mb = 2150u64 + ((self.context_size as u64 * 1024) / (1024 * 1024));
+        // Empreinte mémoire adaptée à la taille réelle du modèle + buffer KV context
+        let file_size_mb = std::fs::metadata(&path)
+            .map(|m| m.len() / (1024 * 1024))
+            .unwrap_or(2150);
+        let simulated_footprint_mb =
+            (file_size_mb + 100) + ((self.context_size as u64 * 1024) / (1024 * 1024));
 
         let loaded = LoadedModel {
-            model_path: path_str,
+            model_path: path.to_string_lossy().to_string(),
             context_size: self.context_size,
             memory_footprint_mb: simulated_footprint_mb,
             metadata,
@@ -320,12 +329,24 @@ impl LlmProvider for LocalLlmEngine {
     }
 
     async fn fetch_models(&self) -> Result<Vec<String>, LlmError> {
-        Ok(vec!["Qwen2.5-3B-Instruct-Q4_K_M.gguf".to_string()])
+        let models = crate::model_discovery::discover_models(None);
+        if models.is_empty() {
+            Ok(vec!["Qwen2.5-3B-Instruct-Q4_K_M.gguf".to_string()])
+        } else {
+            Ok(models.into_iter().map(|m| m.name).collect())
+        }
     }
 }
 
 /// Résout le chemin par défaut du répertoire de modèles selon la plateforme hôte.
 pub fn resolve_default_model_dir() -> PathBuf {
+    let candidates = crate::model_discovery::get_candidate_model_dirs();
+    for dir in &candidates {
+        if dir.exists() && dir.is_dir() {
+            return dir.clone();
+        }
+    }
+
     #[cfg(target_os = "windows")]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {

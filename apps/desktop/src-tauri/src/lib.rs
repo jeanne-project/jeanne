@@ -317,14 +317,36 @@ async fn get_local_inference_stats(
     Ok(state.local_engine.get_stats().await)
 }
 
-/// Retourne le chemin complet attendu du fichier modèle GGUF par défaut.
+/// Retourne le chemin complet attendu du fichier modèle GGUF par défaut ou trouvé.
 /// Utilisé par le frontend pour guider l'utilisateur lors de la configuration initiale.
 #[tauri::command]
 fn get_default_model_path() -> String {
+    if let Some(p) = jeanne_core::resolve_model_path(None) {
+        p.to_string_lossy().to_string()
+    } else {
+        jeanne_core::resolve_default_model_dir()
+            .join("qwen2.5-3b-instruct-q4_k_m.gguf")
+            .to_string_lossy()
+            .to_string()
+    }
+}
+
+/// Retourne le répertoire actif des modèles locaux GGUF.
+#[tauri::command]
+fn get_models_directory() -> String {
     jeanne_core::resolve_default_model_dir()
-        .join("Qwen2.5-3B-Instruct-Q4_K_M.gguf")
         .to_string_lossy()
         .to_string()
+}
+
+/// Découvre tous les modèles GGUF disponibles dans les dossiers modèles et indique lequel est chargé.
+#[tauri::command]
+async fn list_available_models(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<jeanne_core::DiscoveredModel>, String> {
+    let currently_loaded = state.local_engine.loaded_model_path().await;
+    let models = jeanne_core::discover_models(currently_loaded.as_deref());
+    Ok(models)
 }
 
 #[tauri::command]
@@ -597,7 +619,9 @@ pub fn run() {
             get_snippets,
             evaluate_math,
             ai_process_clipboard,
-            ask_vault
+            ask_vault,
+            list_available_models,
+            get_models_directory
         ])
         .setup(|app| {
             tracing::info!("Initialisation des sous-systèmes Jeanne Desktop...");

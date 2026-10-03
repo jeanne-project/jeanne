@@ -43,6 +43,16 @@ export interface SnippetItem {
   content: string;
 }
 
+export interface DiscoveredModel {
+  name: string;
+  path: string;
+  size_bytes: number;
+  size_formatted: string;
+  architecture?: string;
+  is_loaded: boolean;
+  fits_ram: boolean;
+}
+
 export interface IpcCommands {
   search_notes(query: string, limit?: number): Promise<SearchResult[]>;
   capture_quick_note(content: string): Promise<string>;
@@ -54,6 +64,8 @@ export interface IpcCommands {
   get_hardware_profile(): Promise<HardwareInfo>;
   get_local_inference_stats(): Promise<LocalInferenceStats>;
   get_default_model_path(): Promise<string>;
+  get_models_directory(): Promise<string>;
+  list_available_models(): Promise<DiscoveredModel[]>;
   execute_todo(content: string): Promise<string>;
   get_vault_tasks(limit?: number): Promise<TaskItem[]>;
   toggle_vault_task(file_path: string, line_number: number, checked: boolean): Promise<void>;

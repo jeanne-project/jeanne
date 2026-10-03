@@ -49,3 +49,14 @@ commands.allow = ["ask_vault"]
 identifier = "allow-get-default-model-path"
 description = "Enables get_default_model_path command."
 commands.allow = ["get_default_model_path"]
+
+[[permission]]
+identifier = "allow-list-available-models"
+description = "Enables list_available_models command."
+commands.allow = ["list_available_models"]
+
+[[permission]]
+identifier = "allow-get-models-directory"
+description = "Enables get_models_directory command."
+commands.allow = ["get_models_directory"]
+

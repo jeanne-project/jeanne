@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import QuickAccess from './lib/components/QuickAccess.svelte';
-  import type { VaultStats, HardwareInfo, LocalInferenceStats } from './lib/types/ipc';
+  import type { VaultStats, HardwareInfo, LocalInferenceStats, DiscoveredModel } from './lib/types/ipc';
 
   let windowLabel = $state('main');
   let coreVersion = $state('Chargement...');
@@ -11,7 +11,17 @@
   let inferenceStats = $state<LocalInferenceStats | null>(null);
   let isModelLoading = $state(false);
 
-  // Modals
+  // Paramètres & Découverte Multi-Modèles
+  let showSettingsModal = $state(false);
+  let availableModels = $state<DiscoveredModel[]>([]);
+  let modelsDirectory = $state('');
+  let selectedModelPath = $state('');
+  let isScanningModels = $state(false);
+  let modelLoadMessage = $state('');
+  let modelLoadError = $state('');
+  let modelsDirCopied = $state(false);
+
+  // Modals Aide & Setup
   let showHelpModal = $state(false);
   let showModelSetupModal = $state(false);
   let modelSetupPath = $state('');
@@ -19,6 +29,7 @@
   let pathCopied = $state(false);
 
   const isQuickAccess = $derived(windowLabel === 'quick-access');
+  const loadedModel = $derived(availableModels.find((m) => m.is_loaded));
 
   async function refreshHardware() {
     try {
@@ -29,6 +40,84 @@
     }
   }
 
+  async function loadModelsList() {
+    isScanningModels = true;
+    modelLoadError = '';
+    try {
+      modelsDirectory = await invoke<string>('get_models_directory');
+      availableModels = await invoke<DiscoveredModel[]>('list_available_models');
+      const loaded = availableModels.find((m) => m.is_loaded);
+      if (loaded) {
+        selectedModelPath = loaded.path;
+      } else if (!selectedModelPath && availableModels.length > 0) {
+        selectedModelPath = availableModels[0].path;
+      }
+    } catch (e) {
+      console.error('Erreur scan modèles', e);
+    } finally {
+      isScanningModels = false;
+    }
+  }
+
+  async function handleLoadSelectedModel(modelPath?: string) {
+    const targetPath = modelPath || selectedModelPath;
+    isModelLoading = true;
+    modelLoadMessage = '';
+    modelLoadError = '';
+    try {
+      await invoke('load_local_model', { modelPath: targetPath || null });
+      await refreshHardware();
+      await loadModelsList();
+      modelLoadMessage = 'Modèle chargé avec succès en mémoire vive !';
+      setTimeout(() => {
+        modelLoadMessage = '';
+      }, 4000);
+    } catch (e: unknown) {
+      modelLoadError = String(e);
+    } finally {
+      isModelLoading = false;
+    }
+  }
+
+  async function handleUnloadModel() {
+    isModelLoading = true;
+    modelLoadMessage = '';
+    modelLoadError = '';
+    try {
+      await invoke('unload_local_model');
+      await refreshHardware();
+      await loadModelsList();
+      modelLoadMessage = 'Modèle déchargé avec succès (< 200 Mo RAM).';
+      setTimeout(() => {
+        modelLoadMessage = '';
+      }, 4000);
+    } catch (e: unknown) {
+      modelLoadError = String(e);
+    } finally {
+      isModelLoading = false;
+    }
+  }
+
+  function openSettings() {
+    showSettingsModal = true;
+    modelLoadMessage = '';
+    modelLoadError = '';
+    loadModelsList();
+    refreshHardware();
+  }
+
+  async function copyModelsDirectory() {
+    try {
+      await navigator.clipboard.writeText(modelsDirectory);
+      modelsDirCopied = true;
+      setTimeout(() => {
+        modelsDirCopied = false;
+      }, 2000);
+    } catch {
+      // Fallback si clipboard non disponible
+    }
+  }
+
   async function toggleLocalModel() {
     if (!hardwareInfo) return;
     isModelLoading = true;
@@ -36,9 +125,10 @@
       if (hardwareInfo.recommended_model_loaded) {
         await invoke('unload_local_model');
       } else {
-        await invoke('load_local_model');
+        await invoke('load_local_model', { modelPath: selectedModelPath || null });
       }
       await refreshHardware();
+      await loadModelsList();
     } catch (e: unknown) {
       const errMsg = String(e);
       // Si le modèle est introuvable → afficher le guide d'installation
@@ -62,7 +152,9 @@
     try {
       await navigator.clipboard.writeText(modelSetupPath);
       pathCopied = true;
-      setTimeout(() => { pathCopied = false; }, 2000);
+      setTimeout(() => {
+        pathCopied = false;
+      }, 2000);
     } catch {
       // Fallback si clipboard non disponible
     }
@@ -104,6 +196,7 @@
         });
 
       refreshHardware();
+      loadModelsList();
     }
   });
 
@@ -125,6 +218,7 @@
     if (e.key === 'Escape') {
       showHelpModal = false;
       showModelSetupModal = false;
+      showSettingsModal = false;
     }
   }}
 />
@@ -146,6 +240,19 @@
               <kbd>Alt</kbd> + <kbd>Espace</kbd>
             </div>
           </div>
+          <button
+            type="button"
+            class="settings-button"
+            onclick={openSettings}
+            title="Paramètres de Jeanne (Modèles GGUF, Diagnostic Matériel...)"
+            aria-label="Ouvrir les paramètres"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span>Paramètres</span>
+          </button>
           <button
             type="button"
             class="help-button"
@@ -212,12 +319,15 @@
         <div class="model-header">
           <h2 class="section-title">Inférence Locale (Vulkan / GGUF)</h2>
           <span class="status-badge {hardwareInfo?.recommended_model_loaded ? 'status-active' : 'status-idle'}">
-            {hardwareInfo?.recommended_model_loaded ? 'Modèle Chargé (3B)' : 'Modèle Déchargé'}
+            {hardwareInfo?.recommended_model_loaded ? (loadedModel ? `Modèle Actif : ${loadedModel.name}` : 'Modèle Chargé (3B)') : 'Modèle Déchargé'}
           </span>
         </div>
         <p class="model-description">
-          Exécution souveraine 100% hors-ligne. Modèle cible : <code>Qwen2.5-3B-Instruct-Q4_K_M</code>.
-          Fonctionne sans connexion internet ni envoi de données.
+          {#if loadedModel}
+            Modèle en cours d'exécution : <strong>{loadedModel.name}</strong> ({loadedModel.size_formatted}{loadedModel.architecture ? `, ${loadedModel.architecture}` : ''}). Exécution 100% hors-ligne.
+          {:else}
+            Exécution souveraine 100% hors-ligne. Détecte automatiquement vos modèles dans <code>models/</code>.
+          {/if}
         </p>
         <div class="stats-cards">
           <div class="stat-card">
@@ -246,8 +356,16 @@
             {:else if hardwareInfo?.recommended_model_loaded}
               <span>Décharger le Modèle (&lt; 200 Mo RAM)</span>
             {:else}
-              <span>Charger le Modèle Local (Qwen 3B)</span>
+              <span>Charger le Modèle Local</span>
             {/if}
+          </button>
+          <button
+            type="button"
+            class="model-settings-btn"
+            onclick={openSettings}
+            title="Gérer et sélectionner parmi les modèles GGUF détectés"
+          >
+            ⚙️ Paramètres Modèles ({availableModels.length > 0 ? `${availableModels.length} détecté${availableModels.length > 1 ? 's' : ''}` : 'Gérer'})
           </button>
           <button
             type="button"
@@ -329,6 +447,181 @@
       </div>
       <div class="modal-footer">
         <button class="btn-primary" onclick={() => { showModelSetupModal = false; }}>Compris, je télécharge</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- ─── Modal : Paramètres de Jeanne & Choix du Modèle Local ─── -->
+{#if showSettingsModal}
+  <div class="modal-backdrop" onclick={() => { showSettingsModal = false; }} role="presentation">
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="modal modal-wide" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="modal-settings-title" tabindex="-1">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <span class="settings-header-icon">⚙️</span>
+          <h2 id="modal-settings-title" class="modal-title">Paramètres & Modèles Locaux</h2>
+        </div>
+        <button class="modal-close" onclick={() => { showSettingsModal = false; }} aria-label="Fermer">✕</button>
+      </div>
+
+      <div class="modal-body settings-body">
+        {#if modelLoadMessage}
+          <div class="alert-box alert-success">
+            <strong>✓ Succès :</strong> {modelLoadMessage}
+          </div>
+        {/if}
+        {#if modelLoadError}
+          <div class="alert-box alert-danger">
+            <strong>⚠️ Erreur :</strong> {modelLoadError}
+          </div>
+        {/if}
+
+        <!-- Section 1 : Emplacement des Modèles -->
+        <section class="settings-section">
+          <div class="section-title-bar">
+            <h3 class="settings-subtitle">📁 Répertoire des Modèles GGUF</h3>
+            <button class="btn-xs" onclick={loadModelsList} disabled={isScanningModels}>
+              {isScanningModels ? '🔄 Analyse en cours...' : '🔄 Actualiser'}
+            </button>
+          </div>
+          <p class="settings-desc">
+            Déposez vos fichiers quantifiés <code>.gguf</code> dans ce dossier (ou le dossier <code>models/</code> à la racine du projet). Jeanne les détecte automatiquement.
+          </p>
+          <div class="path-box">
+            <code class="path-text">{modelsDirectory || 'Recherche du répertoire...'}</code>
+            <button class="copy-btn" onclick={copyModelsDirectory} title="Copier le chemin">
+              {modelsDirCopied ? '✓ Copié !' : '📋 Copier'}
+            </button>
+          </div>
+        </section>
+
+        <!-- Section 2 : Sélection du Modèle Local -->
+        <section class="settings-section">
+          <div class="section-title-bar">
+            <h3 class="settings-subtitle">🤖 Modèles Détectés ({availableModels.length})</h3>
+            <span class="badge-count {loadedModel ? 'badge-count-active' : ''}">
+              {loadedModel ? `Actif : ${loadedModel.name}` : 'Aucun modèle en mémoire'}
+            </span>
+          </div>
+
+          {#if availableModels.length === 0}
+            <div class="empty-models-box">
+              <p><strong>⚠️ Aucun modèle <code>.gguf</code> détecté dans le dossier <code>models/</code>.</strong></p>
+              <p class="hint-muted">
+                Pour exécuter l'IA en local 100% hors-ligne, déposez un ou plusieurs fichiers <code>.gguf</code> dans le dossier ci-dessus, puis cliquez sur <strong>« Actualiser »</strong>.
+              </p>
+              <div class="recommended-downloads">
+                <a
+                  class="model-download-card"
+                  href="https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <div class="dl-info">
+                    <span class="dl-title">Qwen2.5-3B-Instruct (Q4_K_M) — Recommandé</span>
+                    <span class="dl-desc">Frugal, rapide (~25-30 tok/s), optimisé pour PC 16 Go avec iGPU (~2.1 Go)</span>
+                  </div>
+                  <span class="dl-action">🤗 Télécharger</span>
+                </a>
+                <a
+                  class="model-download-card"
+                  href="https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <div class="dl-info">
+                    <span class="dl-title">Llama-3.2-3B-Instruct (Q4_K_M)</span>
+                    <span class="dl-desc">Grande polyvalence en rédaction et synthèse (~2.0 Go)</span>
+                  </div>
+                  <span class="dl-action">🤗 Télécharger</span>
+                </a>
+              </div>
+            </div>
+          {:else}
+            <div class="models-grid">
+              {#each availableModels as model}
+                <div class="model-card {model.is_loaded ? 'model-card-active' : ''} {!model.fits_ram ? 'model-card-heavy' : ''}">
+                  <div class="model-card-header">
+                    <div class="model-name-col">
+                      <div class="model-title-row">
+                        <span class="model-title">{model.name}</span>
+                        {#if model.is_loaded}
+                          <span class="tag tag-loaded">🟢 Actif en mémoire</span>
+                        {/if}
+                      </div>
+                      <div class="model-tags">
+                        <span class="tag tag-size">💾 {model.size_formatted}</span>
+                        {#if model.architecture}
+                          <span class="tag tag-arch">🏛️ {model.architecture}</span>
+                        {/if}
+                        {#if !model.fits_ram}
+                          <span class="tag tag-warning">⚠️ &gt; 4.5 Go (Vérifier RAM)</span>
+                        {:else}
+                          <span class="tag tag-ok">✓ Compatible RAM</span>
+                        {/if}
+                      </div>
+                      <div class="model-path-hint" title={model.path}>
+                        <code>{model.path}</code>
+                      </div>
+                    </div>
+                    <div class="model-card-actions">
+                      {#if model.is_loaded}
+                        <button
+                          type="button"
+                          class="btn-sm btn-unload"
+                          onclick={handleUnloadModel}
+                          disabled={isModelLoading}
+                        >
+                          Décharger (&lt; 200 Mo)
+                        </button>
+                      {:else}
+                        <button
+                          type="button"
+                          class="btn-sm btn-load"
+                          onclick={() => handleLoadSelectedModel(model.path)}
+                          disabled={isModelLoading}
+                        >
+                          {isModelLoading ? 'Chargement...' : 'Choisir & Charger'}
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </section>
+
+        <!-- Section 3 : Diagnostic Matériel & Conseils RAM -->
+        <section class="settings-section hardware-advice">
+          <h3 class="settings-subtitle">⚙️ Diagnostic Matériel & Conseils de Puissance</h3>
+          <div class="stats-cards">
+            <div class="stat-card">
+              <span class="stat-label">RAM Totale / Disponible</span>
+              <span class="stat-value">{hardwareInfo ? `${Math.round(hardwareInfo.available_ram_mb / 1024)}G dispo / ${Math.round(hardwareInfo.total_system_ram_mb / 1024)}G` : '...'}</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Accélération Vulkan (GPU)</span>
+              <span class="stat-value">{hardwareInfo?.vulkan_supported ? (hardwareInfo.vulkan_device_name ?? 'Actif') : 'CPU seul'}</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Plafond Frugal Jeanne</span>
+              <span class="stat-value">&lt; 4.5 Go RAM</span>
+            </div>
+          </div>
+          <div class="advice-box">
+            <strong>💡 Quel modèle choisir pour votre PC ?</strong>
+            <ul>
+              <li><strong>PC portable 8 Go ou 16 Go avec iGPU partagé</strong> : Privilégiez impérativement les modèles <strong>3B quantifiés en Q4_K_M</strong> (ex: <code>Qwen2.5-3B</code> ou <code>Llama-3.2-3B</code>). Ils consomment ~2.2 Go de RAM et maintiennent votre système fluide.</li>
+              <li><strong>PC 16 Go+ avec GPU dédié ou 32 Go RAM</strong> : Vous pouvez utiliser des modèles <strong>7B</strong> ou <strong>8B</strong> (ex: <code>Qwen2.5-7B-Instruct-Q4_K_M</code>, ~4.4 Go).</li>
+            </ul>
+          </div>
+        </section>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-primary" onclick={() => { showSettingsModal = false; }}>Fermer</button>
       </div>
     </div>
   </div>
@@ -1201,5 +1494,370 @@
   .shortcut-row span {
     color: #8b949e;
     font-size: 0.85rem;
+  }
+
+  /* ─── Styles Paramètres & Modèles ─── */
+  .settings-button {
+    background: rgba(14, 165, 233, 0.12);
+    border: 1px solid rgba(14, 165, 233, 0.35);
+    color: #bae6fd;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.85rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: inherit;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+
+  .settings-button:hover {
+    background: rgba(14, 165, 233, 0.22);
+    border-color: rgba(14, 165, 233, 0.6);
+    color: #e0f2fe;
+  }
+
+  .model-settings-btn {
+    padding: 0.55rem 1rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    background: rgba(14, 165, 233, 0.12);
+    border: 1px solid rgba(14, 165, 233, 0.35);
+    color: #7dd3fc;
+    transition: all 0.15s ease;
+  }
+
+  .model-settings-btn:hover {
+    background: rgba(14, 165, 233, 0.22);
+    border-color: rgba(14, 165, 233, 0.6);
+    color: #bae6fd;
+  }
+
+  .modal-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .settings-header-icon {
+    font-size: 1.25rem;
+  }
+
+  .settings-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .section-title-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .settings-subtitle {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #f0f6fc;
+    margin: 0;
+  }
+
+  .settings-desc {
+    font-size: 0.84rem;
+    color: #94a3b8;
+    margin: 0;
+    line-height: 1.45;
+  }
+
+  .settings-desc code {
+    background: rgba(99, 102, 241, 0.15);
+    color: #c7d2fe;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+
+  .badge-count {
+    font-size: 0.76rem;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .badge-count-active {
+    background: rgba(34, 197, 94, 0.15);
+    color: #86efac;
+    border-color: rgba(34, 197, 94, 0.35);
+  }
+
+  .alert-success {
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    color: #86efac;
+  }
+
+  .alert-danger {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+  }
+
+  .empty-models-box {
+    background: #0d1117;
+    border: 1px dashed #30363d;
+    border-radius: 8px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    font-size: 0.88rem;
+  }
+
+  .empty-models-box p {
+    margin: 0;
+  }
+
+  .hint-muted {
+    color: #8b949e;
+    font-size: 0.82rem;
+    line-height: 1.4;
+  }
+
+  .recommended-downloads {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
+
+  .model-download-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.7rem 0.9rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+  }
+
+  .model-download-card:hover {
+    background: rgba(99, 102, 241, 0.1);
+    border-color: rgba(99, 102, 241, 0.3);
+  }
+
+  .dl-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .dl-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #f1f5f9;
+  }
+
+  .dl-desc {
+    font-size: 0.78rem;
+    color: #94a3b8;
+  }
+
+  .dl-action {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #86efac;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: rgba(34, 197, 94, 0.12);
+  }
+
+  .models-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+
+  .model-card {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .model-card:hover {
+    border-color: #484f58;
+  }
+
+  .model-card-active {
+    border-color: rgba(34, 197, 94, 0.6);
+    background: rgba(34, 197, 94, 0.04);
+  }
+
+  .model-card-heavy {
+    border-left: 3px solid #eab308;
+  }
+
+  .model-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .model-name-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .model-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #f0f6fc;
+    word-break: break-all;
+  }
+
+  .model-tags {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .tag {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .tag-size {
+    background: rgba(255, 255, 255, 0.08);
+    color: #cbd5e1;
+  }
+
+  .tag-arch {
+    background: rgba(99, 102, 241, 0.15);
+    color: #c7d2fe;
+  }
+
+  .tag-loaded {
+    background: rgba(34, 197, 94, 0.18);
+    color: #86efac;
+    border: 1px solid rgba(34, 197, 94, 0.4);
+  }
+
+  .tag-warning {
+    background: rgba(234, 179, 8, 0.15);
+    color: #fde68a;
+  }
+
+  .tag-ok {
+    background: rgba(34, 197, 94, 0.1);
+    color: #86efac;
+  }
+
+  .model-path-hint {
+    font-size: 0.7rem;
+    color: #64748b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .model-path-hint code {
+    background: none;
+    color: inherit;
+    padding: 0;
+  }
+
+  .model-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .btn-sm {
+    padding: 0.45rem 0.85rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    border: none;
+    transition: all 0.15s ease;
+  }
+
+  .btn-xs {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #c7d2fe;
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-size: 0.74rem;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .btn-xs:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  .btn-xs:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .advice-box {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    font-size: 0.83rem;
+    color: #94a3b8;
+    line-height: 1.5;
+  }
+
+  .advice-box strong {
+    color: #f0f6fc;
+    display: block;
+    margin-bottom: 0.4rem;
+  }
+
+  .advice-box ul {
+    margin: 0;
+    padding-left: 1.2rem;
+  }
+
+  .advice-box li {
+    margin-bottom: 0.3rem;
+  }
+
+  .advice-box code {
+    background: rgba(99, 102, 241, 0.15);
+    color: #c7d2fe;
+    padding: 1px 4px;
+    border-radius: 3px;
   }
 </style>
