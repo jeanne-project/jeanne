@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import QuickAccess from './lib/components/QuickAccess.svelte';
-  import type { VaultStats, HardwareInfo, LocalInferenceStats, DiscoveredModel, LocalEngineConfig, ModelRecommendedParams } from './lib/types/ipc';
+  import type { VaultStats, HardwareInfo, LocalInferenceStats, DiscoveredModel, LocalEngineConfig, ModelRecommendedParams, VoiceStatus, AudioDevicesReport } from './lib/types/ipc';
 
   let windowLabel = $state('main');
   let coreVersion = $state('Chargement...');
@@ -10,6 +10,11 @@
   let hardwareInfo = $state<HardwareInfo | null>(null);
   let inferenceStats = $state<LocalInferenceStats | null>(null);
   let isModelLoading = $state(false);
+
+  // Pipeline Vocal (Jalon 5)
+  let voiceStatus = $state<VoiceStatus | null>(null);
+  let isVoiceToggling = $state(false);
+  let audioDevices = $state<AudioDevicesReport | null>(null);
 
   // Paramètres & Découverte Multi-Modèles
   let showSettingsModal = $state(false);
@@ -100,6 +105,29 @@
       inferenceStats = await invoke<LocalInferenceStats>('get_local_inference_stats');
     } catch {
       // Ignoré si mode web pur
+    }
+  }
+
+  async function refreshVoice() {
+    try {
+      voiceStatus = await invoke<VoiceStatus>('get_voice_status');
+      audioDevices = await invoke<AudioDevicesReport>('list_audio_devices');
+    } catch {
+      // Ignoré si mode web pur
+    }
+  }
+
+  async function handleToggleVoice() {
+    if (isVoiceToggling) return;
+    isVoiceToggling = true;
+    try {
+      const target = !(voiceStatus?.is_active);
+      await invoke<boolean>('toggle_voice_pipeline', { active: target });
+      await refreshVoice();
+    } catch (e) {
+      console.error('Erreur bascule vocal:', e);
+    } finally {
+      isVoiceToggling = false;
     }
   }
 
@@ -347,6 +375,7 @@
         });
 
       refreshHardware();
+      refreshVoice();
       loadModelsList();
       loadEngineConfig();
     }
@@ -526,6 +555,56 @@
             title="Voir les instructions d'installation du modèle"
           >
             ℹ️ Guide d'installation
+          </button>
+        </div>
+      </section>
+
+      <!-- Pipeline Vocal Bidirectionnel (Jalon 5) -->
+      <section class="model-section voice-section" aria-label="Pipeline Vocal Bidirectionnel">
+        <div class="model-header">
+          <div class="model-title-group">
+            <h2 class="section-title">Interaction Vocale Bidirectionnelle</h2>
+            <span class="model-subtitle">STT Whisper &amp; TTS Piper streaming avec VAD &amp; rééchantillonnage 16 kHz</span>
+          </div>
+          <span class="status-badge {voiceStatus?.is_active ? 'status-active' : 'status-idle'}">
+            {voiceStatus?.is_active ? `Vocal Actif (${voiceStatus.state})` : 'Vocal Inactif (0 Mo RAM)'}
+          </span>
+        </div>
+
+        <div class="stats-cards">
+          <div class="stat-card">
+            <span class="stat-label">Microphone Détecté</span>
+            <span class="stat-value">{audioDevices?.default_input_name ?? 'Microphone Système'}</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Sortie Audio TTS</span>
+            <span class="stat-value">{audioDevices?.default_output_name ?? 'Haut-parleur Système'}</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Latence Synthèse (TTFB)</span>
+            <span class="stat-value">{voiceStatus?.last_synthesis_ttfb_ms ?? 0} ms (&lt; 800 ms)</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Empreinte RAM Vocale</span>
+            <span class="stat-value">{voiceStatus?.memory_allocated_mb ?? 0} Mo</span>
+          </div>
+        </div>
+
+        <div class="model-actions">
+          <button
+            type="button"
+            class="model-toggle-btn {voiceStatus?.is_active ? 'btn-unload' : 'btn-load'}"
+            onclick={handleToggleVoice}
+            disabled={isVoiceToggling}
+          >
+            {#if isVoiceToggling}
+              <span class="spinner"></span>
+              <span>Bascule en cours...</span>
+            {:else if voiceStatus?.is_active}
+              <span>🎙️ Désactiver l'Interaction Vocale (0 Mo)</span>
+            {:else}
+              <span>🎙️ Activer l'Interaction Vocale</span>
+            {/if}
           </button>
         </div>
       </section>

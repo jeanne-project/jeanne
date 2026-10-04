@@ -10,6 +10,13 @@ pub mod productivity;
 pub mod rag;
 pub mod storage;
 pub mod vault;
+pub mod voice;
+
+pub use voice::{
+    get_audio_devices, AudioDevice, AudioDevicesReport, AudioResampler, PiperTtsEngine,
+    SentenceSplitter, SttEngine, TtsEngine, VadConfig, VadDecision, VoiceActivityDetector,
+    VoiceError, VoicePipeline, VoiceState, VoiceStatus, WhisperSttEngine,
+};
 
 pub use model_discovery::{
     DiscoveredModel, discover_models, discover_models_in_dirs, format_file_size,
