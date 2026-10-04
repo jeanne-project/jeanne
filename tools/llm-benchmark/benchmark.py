@@ -22,7 +22,9 @@ from embedded_engine import EmbeddedGgufEngine
 from environment_setup import (
     check_and_relaunch_in_venv,
     create_and_setup_venv,
+    find_venvs_with_llama_cpp,
     get_available_backend_profiles,
+    get_best_matching_venv,
     get_venv_python_path,
 )
 from hardware_detector import detect_host_hardware
@@ -78,6 +80,11 @@ def parse_inference_profile(profile_dict: Dict[str, Any]) -> InferenceParams:
 
 def execute_init(args: argparse.Namespace) -> None:
     """Detects host hardware, scans for model files, and generates config.json."""
+    # Basculer sur un virtualenv spécifique si demandé
+    target_venv = getattr(args, "venv", None)
+    if target_venv:
+        check_and_relaunch_in_venv(target_venv, current_dir, auto_detect=False)
+
     output_path = args.output
     if not os.path.isabs(output_path):
         output_path = os.path.abspath(os.path.join(current_dir, output_path))
@@ -160,6 +167,17 @@ def execute_init(args: argparse.Namespace) -> None:
     print(f"🤖 Modèles configurés : {len(models)}")
     print("\n👉 Vous pouvez dès à présent lancer le benchmark avec :")
     print("   python3 tools/llm-benchmark/benchmark.py")
+
+    try:
+        detected_venvs = find_venvs_with_llama_cpp([current_dir])
+        if detected_venvs:
+            best_v = get_best_matching_venv(detected_venvs)
+            if best_v:
+                v_alias = best_v["name"].replace(".venv-", "")
+                print(f"\n💡 Environnement optimisé détecté (\033[1;36m{best_v['name']}\033[0m, backend {best_v['backend'].upper()}) :")
+                print(f"   python3 tools/llm-benchmark/benchmark.py run --venv {v_alias}")
+    except Exception:
+        pass
     print("=" * 70 + "\n")
 
 
@@ -415,10 +433,10 @@ def run_benchmark_for_model_profile(
 
 def execute_run(args: argparse.Namespace) -> None:
     """Executes the benchmark matrix and generates reports."""
-    # Basculer automatiquement sur le virtualenv spécifié si demandé
+    # Basculer automatiquement sur le virtualenv spécifié ou détecté
     target_venv = getattr(args, "venv", None)
-    if target_venv:
-        check_and_relaunch_in_venv(target_venv, current_dir)
+    no_auto_venv = getattr(args, "no_auto_venv", False)
+    check_and_relaunch_in_venv(target_venv, current_dir, auto_detect=not no_auto_venv)
 
     try:
         config = load_config(args.config)
@@ -554,6 +572,10 @@ def main():
         action="store_true",
         help="Ne pas sonder le serveur Ollama local",
     )
+    init_parser.add_argument(
+        "--venv",
+        help="Sonder ou initialiser sous un environnement virtuel spécifique (ex: cuda, vulkan, cpu, .venv-cuda)",
+    )
 
     # Sub-command: setup
     setup_parser = subparsers.add_parser("setup", help="Préparer les environnements virtuels isolés (CUDA, Vulkan, CPU)")
@@ -591,6 +613,11 @@ def main():
         p.add_argument(
             "--venv",
             help="Exécuter le benchmark dans un environnement virtuel spécifique (ex: cuda, vulkan, cpu, .venv-cuda)",
+        )
+        p.add_argument(
+            "--no-auto-venv",
+            action="store_true",
+            help="Désactiver la bascule automatique sur un virtualenv détecté",
         )
         p.add_argument(
             "--models",

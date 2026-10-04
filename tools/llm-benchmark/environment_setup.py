@@ -90,7 +90,19 @@ def get_available_backend_profiles() -> List[BackendProfile]:
 
 
 def get_venv_python_path(venv_dir: str) -> str:
-    """Returns the path to the python binary inside the given venv directory."""
+    """Returns the path to the python binary inside the given venv directory (cross-platform)."""
+    candidates = [
+        os.path.join(venv_dir, "Scripts", "python.exe"),
+        os.path.join(venv_dir, "Scripts", "python"),
+        os.path.join(venv_dir, "bin", "python"),
+        os.path.join(venv_dir, "bin", "python3"),
+        os.path.join(venv_dir, "bin", "python.exe"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+
+    # Fallback standard path according to OS
     if platform.system() == "Windows":
         return os.path.join(venv_dir, "Scripts", "python.exe")
     return os.path.join(venv_dir, "bin", "python")
@@ -170,49 +182,357 @@ def create_and_setup_venv(
     return True, venv_dir
 
 
-def check_and_relaunch_in_venv(venv_identifier: str, base_dir: str) -> None:
+def get_candidate_venv_dirs(base_dirs: Optional[List[str]] = None) -> List[str]:
+    """
+    Scans common project locations to discover virtual environments.
+    Checks:
+      - os.environ['VIRTUAL_ENV']
+      - tools/llm-benchmark/
+      - tools/llm-benchmark/venvs/
+      - Current working directory (os.getcwd())
+      - Project root directory (repo root)
+    """
+    search_dirs: List[str] = []
+    if base_dirs:
+        for d in base_dirs:
+            if d and os.path.isdir(d) and d not in search_dirs:
+                search_dirs.append(os.path.abspath(d))
+
+    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    if pkg_dir not in search_dirs:
+        search_dirs.append(pkg_dir)
+
+    venvs_sub = os.path.join(pkg_dir, "venvs")
+    if os.path.isdir(venvs_sub) and venvs_sub not in search_dirs:
+        search_dirs.append(venvs_sub)
+
+    cwd = os.getcwd()
+    if os.path.isdir(cwd) and cwd not in search_dirs:
+        search_dirs.append(os.path.abspath(cwd))
+
+    repo_root = os.path.dirname(os.path.dirname(pkg_dir))
+    if os.path.isdir(repo_root) and repo_root not in search_dirs:
+        search_dirs.append(repo_root)
+
+    candidates: List[str] = []
+    seen = set()
+
+    def add_candidate(path: str):
+        norm = os.path.normcase(os.path.abspath(path))
+        if norm not in seen and os.path.isdir(path):
+            seen.add(norm)
+            candidates.append(os.path.abspath(path))
+
+    # Active virtualenv in environment
+    active_env = os.environ.get("VIRTUAL_ENV")
+    if active_env:
+        add_candidate(active_env)
+
+    # Standard names to probe directly
+    standard_names = [
+        ".venv-cuda",
+        ".venv-vulkan",
+        ".venv-cpu",
+        ".venv-metal",
+        ".venv",
+        "venv",
+        "env",
+        ".env",
+        "cuda",
+        "vulkan",
+        "cpu",
+    ]
+
+    for s_dir in search_dirs:
+        for name in standard_names:
+            add_candidate(os.path.join(s_dir, name))
+
+        # Dynamic discovery of folders starting with .venv or containing pyvenv.cfg
+        try:
+            for entry in os.listdir(s_dir):
+                entry_path = os.path.join(s_dir, entry)
+                if os.path.isdir(entry_path) and (
+                    entry.startswith(".venv")
+                    or entry.startswith("venv")
+                    or os.path.isfile(os.path.join(entry_path, "pyvenv.cfg"))
+                ):
+                    add_candidate(entry_path)
+        except Exception:
+            pass
+
+    return candidates
+
+
+def get_site_packages_dir(venv_dir: str) -> Optional[str]:
+    """Finds site-packages directory inside a virtualenv."""
+    # Windows: Lib/site-packages
+    win_sp = os.path.join(venv_dir, "Lib", "site-packages")
+    if os.path.isdir(win_sp):
+        return win_sp
+
+    # Linux / macOS: lib/pythonX.Y/site-packages
+    lib_dir = os.path.join(venv_dir, "lib")
+    if os.path.isdir(lib_dir):
+        try:
+            for entry in os.listdir(lib_dir):
+                if entry.startswith("python"):
+                    sp = os.path.join(lib_dir, entry, "site-packages")
+                    if os.path.isdir(sp):
+                        return sp
+        except Exception:
+            pass
+    return None
+
+
+def inspect_venv(venv_dir: str) -> Optional[Dict[str, Any]]:
+    """
+    Inspects a directory to check if it's a valid venv and whether llama-cpp-python is installed.
+    Returns: dict with details or None if not a valid venv.
+    """
+    python_bin = get_venv_python_path(venv_dir)
+    if not os.path.isfile(python_bin):
+        return None
+
+    venv_name = os.path.basename(os.path.normpath(venv_dir))
+    site_packages = get_site_packages_dir(venv_dir)
+
+    has_llama_cpp = False
+    version = None
+
+    # 1. Quick check via site-packages
+    if site_packages and os.path.isdir(site_packages):
+        llama_dir = os.path.join(site_packages, "llama_cpp")
+        if os.path.isdir(llama_dir):
+            has_llama_cpp = True
+            try:
+                for item in os.listdir(site_packages):
+                    if item.startswith("llama_cpp_python-") and item.endswith(".dist-info"):
+                        parts = item.replace(".dist-info", "").split("-")
+                        if len(parts) >= 2:
+                            version = parts[1]
+                            break
+            except Exception:
+                pass
+
+    # 2. Verification via subprocess
+    if not version:
+        try:
+            res = subprocess.run(
+                [python_bin, "-c", "import llama_cpp; print(llama_cpp.__version__)"],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                has_llama_cpp = True
+                version = res.stdout.strip()
+        except Exception:
+            pass
+
+    if not has_llama_cpp:
+        return {
+            "path": venv_dir,
+            "name": venv_name,
+            "python_path": python_bin,
+            "site_packages": site_packages,
+            "has_llama_cpp": False,
+            "version": None,
+            "backend": "unknown",
+        }
+
+    backend_hint = "cpu"
+    name_lower = venv_name.lower()
+    if "cuda" in name_lower:
+        backend_hint = "cuda"
+    elif "vulkan" in name_lower:
+        backend_hint = "vulkan"
+    elif "metal" in name_lower:
+        backend_hint = "metal"
+
+    return {
+        "path": venv_dir,
+        "name": venv_name,
+        "python_path": python_bin,
+        "site_packages": site_packages,
+        "has_llama_cpp": True,
+        "version": version or "inconnue",
+        "backend": backend_hint,
+    }
+
+
+def find_venvs_with_llama_cpp(base_dirs: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """Returns a list of all discovered virtual environments containing llama-cpp-python."""
+    candidates = get_candidate_venv_dirs(base_dirs)
+    venvs_found = []
+    seen = set()
+
+    for c in candidates:
+        info = inspect_venv(c)
+        if info and info["has_llama_cpp"]:
+            norm = os.path.normcase(os.path.abspath(info["path"]))
+            if norm not in seen:
+                seen.add(norm)
+                venvs_found.append(info)
+
+    return venvs_found
+
+
+def get_best_matching_venv(venvs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Chooses the most optimal venv for the host machine hardware.
+    E.g. NVIDIA -> prefers CUDA venv; AMD/Intel -> prefers Vulkan venv.
+    """
+    if not venvs:
+        return None
+
+    hw = detect_host_hardware()
+    gpu_str = hw.get("gpu", "").lower()
+
+    if "nvidia" in gpu_str:
+        for v in venvs:
+            if v["backend"] == "cuda" or "cuda" in v["name"].lower():
+                return v
+
+    if any(k in gpu_str for k in ["radeon", "amd", "iris", "intel", "vulkan"]):
+        for v in venvs:
+            if v["backend"] == "vulkan" or "vulkan" in v["name"].lower():
+                return v
+
+    return venvs[0]
+
+
+def try_activate_venv_in_process(venv_info: Optional[Dict[str, Any]] = None) -> bool:
+    """
+    Attempts to inject a venv's site-packages and DLL directories into the current running process
+    so that `import llama_cpp` succeeds without restarting Python.
+    """
+    target = venv_info
+    if not target:
+        venvs = find_venvs_with_llama_cpp()
+        target = get_best_matching_venv(venvs) if venvs else None
+
+    if not target or not target.get("site_packages"):
+        return False
+
+    sp = target["site_packages"]
+    if sp not in sys.path:
+        sys.path.insert(0, sp)
+
+    # Windows DLL directory handling
+    if platform.system() == "Windows":
+        v_dir = target["path"]
+        scripts_dir = os.path.join(v_dir, "Scripts")
+        llama_pkg_dir = os.path.join(sp, "llama_cpp")
+
+        for dll_dir in [scripts_dir, llama_pkg_dir]:
+            if os.path.isdir(dll_dir):
+                if hasattr(os, "add_dll_directory"):
+                    try:
+                        os.add_dll_directory(dll_dir)
+                    except Exception:
+                        pass
+                if dll_dir not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
+
+    try:
+        import llama_cpp
+        return True
+    except Exception:
+        return False
+
+
+def check_and_relaunch_in_venv(
+    venv_identifier: Optional[str] = None,
+    base_dir: Optional[str] = None,
+    auto_detect: bool = True,
+) -> bool:
     """
     Relaunches the current script inside the specified venv python interpreter
-    if not already running inside it.
+    or automatically detects an available venv with llama-cpp-python if needed.
     """
-    target_venv = venv_identifier
-    if not target_venv.startswith(".venv-") and not os.path.isabs(target_venv):
-        # Allow passing alias like "cuda", "vulkan", "cpu"
-        target_venv = f".venv-{target_venv}"
+    # Prevent infinite relaunch loops
+    if os.environ.get("JEANNE_BENCHMARK_RELAUNCHED") == "1":
+        return False
 
-    if not os.path.isabs(target_venv):
-        target_venv = os.path.join(base_dir, target_venv)
+    pkg_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+    target_python: Optional[str] = None
+    target_venv_name: str = ""
 
-    venv_python = get_venv_python_path(target_venv)
+    if venv_identifier:
+        # User explicitly specified a venv alias or path
+        target_venv = venv_identifier
+        if not target_venv.startswith(".venv-") and not os.path.isabs(target_venv):
+            candidate_prefixed = f".venv-{target_venv}"
+            if os.path.isdir(os.path.join(pkg_dir, candidate_prefixed)):
+                target_venv = candidate_prefixed
 
-    if not os.path.exists(venv_python):
-        print(f"❌ L'environnement virtuel '{target_venv}' n'existe pas.")
-        print("💡 Vous pouvez le créer automatiquement avec :")
-        print(f"   python3 tools/llm-benchmark/benchmark.py setup --backend {venv_identifier.replace('.venv-', '')}")
-        sys.exit(1)
+        if not os.path.isabs(target_venv):
+            target_venv = os.path.join(pkg_dir, target_venv)
 
-    # Check if we are already inside this venv
+        target_python = get_venv_python_path(target_venv)
+        target_venv_name = os.path.basename(target_venv)
+
+        if not os.path.exists(target_python):
+            print(f"❌ L'environnement virtuel '{target_venv}' n'existe pas.")
+            print("💡 Vous pouvez le créer automatiquement avec :")
+            clean_id = venv_identifier.replace(".venv-", "")
+            print(f"   python3 tools/llm-benchmark/benchmark.py setup --backend {clean_id}")
+            sys.exit(1)
+    elif auto_detect:
+        # Check if current Python already has llama_cpp
+        try:
+            import llama_cpp
+            return False  # Already in an environment with llama_cpp
+        except ImportError:
+            pass
+
+        # Try to find existing venvs with llama_cpp
+        venvs = find_venvs_with_llama_cpp([pkg_dir])
+        best = get_best_matching_venv(venvs)
+        if best and os.path.isfile(best["python_path"]):
+            target_python = best["python_path"]
+            target_venv_name = best["name"]
+            print(f"\n💡 \033[1;36mMoteur llama-cpp-python détecté dans le venv '{target_venv_name}'.\033[0m")
+            print(f"   Bascule automatique sur cet environnement pour l'exécution...")
+
+    if not target_python or not os.path.isfile(target_python):
+        return False
+
     current_python = os.path.abspath(sys.executable)
-    target_python_abs = os.path.abspath(venv_python)
+    target_python_abs = os.path.abspath(target_python)
 
-    if current_python != target_python_abs:
-        # Filter out the --venv argument to avoid loop
-        new_argv = [venv_python]
-        skip_next = False
-        for arg in sys.argv:
-            if skip_next:
-                skip_next = False
-                continue
-            if arg in ("--venv", "-v"):
-                skip_next = True
-                continue
-            if arg.startswith("--venv="):
-                continue
-            new_argv.append(arg)
+    if os.path.normcase(current_python) == os.path.normcase(target_python_abs):
+        return False
 
-        # Replace process with the venv python
+    # Build new argv, filtering out --venv argument to prevent loop
+    new_argv = [target_python_abs]
+    skip_next = False
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in ("--venv", "-v"):
+            skip_next = True
+            continue
+        if arg.startswith("--venv="):
+            continue
+        new_argv.append(arg)
+
+    os.environ["JEANNE_BENCHMARK_RELAUNCHED"] = "1"
+
+    if platform.system() == "Windows":
+        # Windows compatibility: subprocess.call + exit ensures reliable execution
+        try:
+            ret = subprocess.call([target_python_abs] + new_argv[1:])
+            sys.exit(ret)
+        except Exception as e:
+            print(f"❌ Échec de relance dans le venv sous Windows : {e}")
+            sys.exit(1)
+    else:
         try:
             os.execv(target_python_abs, new_argv)
         except Exception as e:
             print(f"❌ Échec de relance dans le venv : {e}")
             sys.exit(1)
+
+    return True

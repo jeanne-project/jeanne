@@ -40,18 +40,38 @@ class EmbeddedGgufEngine:
     @staticmethod
     def is_available() -> Tuple[bool, str]:
         """Checks if llama-cpp-python bindings or standalone llama-cli are installed."""
+        # 1. Vérification dans le processus Python en cours
         try:
             import llama_cpp
-            return True, f"llama-cpp-python (v{llama_cpp.__version__})"
+            return True, f"llama-cpp-python (v{llama_cpp.__version__}) [environnement actif]"
         except ImportError:
             pass
 
-        # Check for standalone llama-cli binary in PATH
+        # 2. Vérification dans les virtualenvs existants
+        try:
+            from environment_setup import find_venvs_with_llama_cpp
+            venvs = find_venvs_with_llama_cpp()
+            if venvs:
+                if len(venvs) == 1:
+                    v = venvs[0]
+                    v_name = v["name"]
+                    ver_str = f"v{v['version']}" if v.get("version") and v["version"] != "inconnue" else "prêt"
+                    return True, f"llama-cpp-python ({ver_str}) [détecté dans le venv '{v_name}']"
+                else:
+                    details = []
+                    for v in venvs:
+                        ver = f"v{v['version']}" if v.get("version") and v["version"] != "inconnue" else "prêt"
+                        details.append(f"{v['name']} ({ver})")
+                    return True, f"llama-cpp-python [détecté dans {len(venvs)} venvs : {', '.join(details)}]"
+        except Exception:
+            pass
+
+        # 3. Check for standalone llama-cli binary in PATH
         cli_path = shutil.which("llama-cli") or shutil.which("llama-simple")
         if cli_path:
             return True, f"binaire llama-cli ({cli_path})"
 
-        return False, "Aucun moteur natif llama.cpp trouvé"
+        return False, "Non installé (pip install llama-cpp-python ou 'python3 tools/llm-benchmark/benchmark.py setup')"
 
     def load(self) -> float:
         """Loads the model into memory. Returns load duration in ms."""
@@ -61,36 +81,44 @@ class EmbeddedGgufEngine:
         t0 = time.perf_counter()
         try:
             from llama_cpp import Llama
-
-            # In llama.cpp, n_gpu_layers=-1 offloads all layers to Vulkan/GPU
-            gpu_layers = self.n_gpu_layers if self.use_vulkan else 0
-            self._llm = Llama(
-                model_path=self.model_path,
-                n_ctx=self.n_ctx,
-                n_gpu_layers=gpu_layers,
-                verbose=self.verbose,
-            )
-            t_end = time.perf_counter()
-            self._load_duration_ms = (t_end - t0) * 1000.0
-            return self._load_duration_ms
         except ImportError:
-            # Fallback to standalone llama-cli if present
-            cli_path = shutil.which("llama-cli")
-            if cli_path:
-                self._llm = "cli_fallback"
-                self._load_duration_ms = 0.0
-                return 0.0
+            # Tenter d'injecter in-process le site-packages d'un venv disponible
+            try:
+                from environment_setup import try_activate_venv_in_process
+                if try_activate_venv_in_process():
+                    from llama_cpp import Llama
+                else:
+                    raise ImportError()
+            except Exception:
+                # Fallback to standalone llama-cli if present
+                cli_path = shutil.which("llama-cli")
+                if cli_path:
+                    self._llm = "cli_fallback"
+                    self._load_duration_ms = 0.0
+                    return 0.0
 
-            raise RuntimeError(
-                "Le moteur d'inférence embarqué requiert 'llama-cpp-python'.\n"
-                "Pour l'installer sur votre PC avec accélération matérielle :\n"
-                "  • NVIDIA (CUDA précompilé - recommandé) :\n"
-                "      pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124\n"
-                "  • NVIDIA (Compilation CUDA) : CMAKE_ARGS=\"-DGGML_CUDA=on\" pip install llama-cpp-python\n"
-                "  • Vulkan (comme Jeanne sur AMD/Intel/NVIDIA) : CMAKE_ARGS=\"-DGGML_VULKAN=on\" pip install llama-cpp-python\n"
-                "  • Apple Silicon (Metal) : CMAKE_ARGS=\"-DGGML_METAL=on\" pip install llama-cpp-python\n"
-                "  • CPU uniquement : pip install llama-cpp-python"
-            )
+                raise RuntimeError(
+                    "Le moteur d'inférence embarqué requiert 'llama-cpp-python'.\n"
+                    "Pour l'installer sur votre PC avec accélération matérielle :\n"
+                    "  • NVIDIA (CUDA précompilé - recommandé) :\n"
+                    "      pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124\n"
+                    "  • NVIDIA (Compilation CUDA) : CMAKE_ARGS=\"-DGGML_CUDA=on\" pip install llama-cpp-python\n"
+                    "  • Vulkan (comme Jeanne sur AMD/Intel/NVIDIA) : CMAKE_ARGS=\"-DGGML_VULKAN=on\" pip install llama-cpp-python\n"
+                    "  • Apple Silicon (Metal) : CMAKE_ARGS=\"-DGGML_METAL=on\" pip install llama-cpp-python\n"
+                    "  • CPU uniquement : pip install llama-cpp-python"
+                )
+
+        # In llama.cpp, n_gpu_layers=-1 offloads all layers to Vulkan/GPU
+        gpu_layers = self.n_gpu_layers if self.use_vulkan else 0
+        self._llm = Llama(
+            model_path=self.model_path,
+            n_ctx=self.n_ctx,
+            n_gpu_layers=gpu_layers,
+            verbose=self.verbose,
+        )
+        t_end = time.perf_counter()
+        self._load_duration_ms = (t_end - t0) * 1000.0
+        return self._load_duration_ms
 
     def generate(
         self,
