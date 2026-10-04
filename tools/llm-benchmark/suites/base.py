@@ -74,6 +74,7 @@ class TestResult:
     tokens_per_sec: float
     response_text: str
     assertions: List[AssertionResult]
+    thinking_tokens: int = 0
     error: Optional[str] = None
 
 
@@ -88,7 +89,24 @@ class BenchmarkSuiteResult:
     overall_score: float = 0.0
     avg_ttft_ms: float = 0.0
     avg_tokens_per_sec: float = 0.0
+    total_duration_sec: float = 0.0
+    total_tokens_generated: int = 0
+    total_thinking_tokens: int = 0
     category_scores: Dict[str, float] = field(default_factory=dict)
+
+
+def extract_thinking_stats(text: str) -> Tuple[int, str]:
+    """
+    Detects <think>...</think> reasoning blocks (e.g. DeepSeek-R1, QwQ).
+    Returns: (thinking_tokens_count, stripped_answer_text)
+    """
+    think_match = re.search(r"<think>(.*?)</think>", text, re.DOTALL | re.IGNORECASE)
+    if think_match:
+        think_content = think_match.group(1).strip()
+        clean_text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+        thinking_tokens = max(1, int(len(think_content.split()) * 1.33))
+        return thinking_tokens, clean_text
+    return 0, text
 
 
 # ==============================================================================

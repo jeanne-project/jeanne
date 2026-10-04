@@ -12,6 +12,17 @@ def compute_verdict(suite: BenchmarkSuiteResult) -> str:
     score = suite.overall_score
     tps = suite.avg_tokens_per_sec
     ttft = suite.avg_ttft_ms
+    total_tokens = suite.total_tokens_generated
+    think_tokens = suite.total_thinking_tokens
+
+    # Surcharge de tokens de réflexion (e.g. DeepSeek-R1, QwQ non calibrés) :
+    # Non viable pour Jeanne car sature la fenêtre KV (4096 tokens max) et détruit la réactivité de la palette (< 50ms)
+    if think_tokens >= 250 or (total_tokens > 0 and (think_tokens / total_tokens) >= 0.25):
+        return f"⚠️ **Non viable pour Jeanne** (Surcharge de réflexion : {think_tokens} tokens de pensée, risque de saturation KV)"
+
+    # Alerte hyper-verbosité sur des requêtes courtes
+    if total_tokens > 2000:
+        return f"⚠️ **Non recommandé** (Hyper-verbeux : {total_tokens} tokens générés)"
 
     if score >= 90.0 and tps >= 20.0 and ttft <= 350.0:
         return "🟢 **Excellent** (Idéal pour Jeanne)"
@@ -94,8 +105,8 @@ class BenchmarkReporter:
         # 2. Tableau Récapitulatif Global
         lines.append("## 🏆 Classement & Adéquation Jeanne")
         lines.append("")
-        lines.append("| Modèle | Profil | Score Global | TTFT Moy. | Débit TPS | RAG | PII | JSON | Réunion | Concision | /corrige | Verdict Matériel |")
-        lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |")
+        lines.append("| Modèle | Profil | Score Global | Durée Tot. | Tokens (Pensée) | TTFT Moy. | Débit TPS | RAG | PII | JSON | Réunion | Concision | /corrige | Verdict Matériel |")
+        lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |")
 
         # Sort suites by overall score descending
         sorted_suites = sorted(self.suites_results, key=lambda s: s.overall_score, reverse=True)
@@ -109,9 +120,16 @@ class BenchmarkReporter:
             corr_sc = f"{suite.category_scores.get('Relecture & Correction (/corrige)', 0.0):.0f}%"
             verdict = compute_verdict(suite)
 
+            dur_str = f"{suite.total_duration_sec:.1f} s"
+            tok_str = (
+                f"{suite.total_tokens_generated} ({suite.total_thinking_tokens})"
+                if suite.total_thinking_tokens > 0
+                else f"{suite.total_tokens_generated}"
+            )
+
             lines.append(
                 f"| **{suite.model_display_name}** | `{suite.profile_name}` | **{suite.overall_score:.1f} / 100** | "
-                f"{suite.avg_ttft_ms:.0f} ms | {suite.avg_tokens_per_sec:.1f} tps | "
+                f"{dur_str} | {tok_str} | {suite.avg_ttft_ms:.0f} ms | {suite.avg_tokens_per_sec:.1f} tps | "
                 f"{rag_sc} | {pii_sc} | {json_sc} | {meet_sc} | {conc_sc} | {corr_sc} | {verdict} |"
             )
         lines.append("")
@@ -126,18 +144,23 @@ class BenchmarkReporter:
             lines.append("")
             lines.append(f"- **ID Modèle** : `{suite.model_id}`")
             lines.append(f"- **Paramètres d'inférence** : `{json.dumps(suite.inference_params)}`")
+            lines.append(f"- **Durée totale cumulée** : `{suite.total_duration_sec:.2f} s`")
+            think_info = f" (dont `{suite.total_thinking_tokens}` tokens de réflexion)" if suite.total_thinking_tokens > 0 else ""
+            lines.append(f"- **Volume total généré** : `{suite.total_tokens_generated} tokens`{think_info}")
             lines.append(f"- **Latence Premier Token (TTFT)** : `{suite.avg_ttft_ms:.1f} ms`")
             lines.append(f"- **Débit moyen** : `{suite.avg_tokens_per_sec:.1f} tokens/s`")
             lines.append("")
             lines.append("### Résultats des Tests :")
             lines.append("")
-            lines.append("| ID Test | Nom du Test | Catégorie | Score | TTFT | Débit | Statut |")
-            lines.append("| :--- | :--- | :--- | :---: | :---: | :---: | :---: |")
+            lines.append("| ID Test | Nom du Test | Catégorie | Score | Durée | Tokens (Pensée) | TTFT | Débit | Statut |")
+            lines.append("| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |")
 
             for t in suite.test_results:
                 badge = "✅ Réussi" if t.passed else ("⚠️ Partiel" if t.score > 0 else "❌ Échec")
+                dur_test = f"{t.total_latency_ms / 1000.0:.2f} s"
+                tok_test = f"{t.tokens_generated} ({t.thinking_tokens})" if t.thinking_tokens > 0 else f"{t.tokens_generated}"
                 lines.append(
-                    f"| `{t.test_id}` | {t.test_name} | {t.category} | {t.score:.0f}% | {t.ttft_ms:.0f} ms | {t.tokens_per_sec:.1f} tps | {badge} |"
+                    f"| `{t.test_id}` | {t.test_name} | {t.category} | {t.score:.0f}% | {dur_test} | {tok_test} | {t.ttft_ms:.0f} ms | {t.tokens_per_sec:.1f} tps | {badge} |"
                 )
 
             lines.append("")
@@ -183,6 +206,9 @@ class BenchmarkReporter:
                 "profile_name": s.profile_name,
                 "inference_params": s.inference_params,
                 "overall_score": round(s.overall_score, 2),
+                "total_duration_sec": round(s.total_duration_sec, 2),
+                "total_tokens_generated": s.total_tokens_generated,
+                "total_thinking_tokens": s.total_thinking_tokens,
                 "avg_ttft_ms": round(s.avg_ttft_ms, 2),
                 "avg_tokens_per_sec": round(s.avg_tokens_per_sec, 2),
                 "category_scores": s.category_scores,
@@ -197,9 +223,12 @@ class BenchmarkReporter:
                         "category": t.category,
                         "passed": t.passed,
                         "score": round(t.score, 2),
-                        "ttft_ms": round(t.ttft_ms, 2),
+                        "duration_sec": round(t.total_latency_ms / 1000.0, 3),
                         "total_latency_ms": round(t.total_latency_ms, 2),
                         "tokens_generated": t.tokens_generated,
+                        "thinking_tokens": t.thinking_tokens,
+                        "content_tokens": max(0, t.tokens_generated - t.thinking_tokens),
+                        "ttft_ms": round(t.ttft_ms, 2),
                         "tokens_per_sec": round(t.tokens_per_sec, 2),
                         "response_text": t.response_text,
                         "error": t.error,

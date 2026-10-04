@@ -33,7 +33,13 @@ from model_scanner import (
 )
 from reporter import BenchmarkReporter
 from suites import get_all_test_cases, get_available_suites
-from suites.base import BenchmarkSuiteResult, InferenceParams, TestCase, TestResult
+from suites.base import (
+    BenchmarkSuiteResult,
+    InferenceParams,
+    TestCase,
+    TestResult,
+    extract_thinking_stats,
+)
 
 
 DEFAULT_CONFIG_FILE = os.path.join(current_dir, "config.json")
@@ -309,7 +315,10 @@ def run_benchmark_for_model_profile(
                 params=effective_params,
             )
 
-            assertions = tc.evaluator(response_text)
+            # Extraction et décompte des tokens de réflexion (<think>...</think>)
+            thinking_tokens, clean_text = extract_thinking_stats(response_text)
+
+            assertions = tc.evaluator(clean_text)
 
             if assertions:
                 avg_score = (sum(a.score for a in assertions) / len(assertions)) * 100.0
@@ -333,14 +342,19 @@ def run_benchmark_for_model_profile(
                 tokens_per_sec=tokens_per_sec,
                 response_text=response_text,
                 assertions=assertions,
+                thinking_tokens=thinking_tokens,
             )
 
+            duration_s = total_latency_ms / 1000.0
+            think_tag = f" (🧠 {thinking_tokens} think)" if thinking_tokens > 0 else ""
+            metrics_str = f"[{duration_s:.2f}s | {tokens_count} tok{think_tag} | TTFT: {ttft_ms:.0f}ms | {tokens_per_sec:.1f} tps]"
+
             if all_passed:
-                print(f"\033[32mPASS ({avg_score:.0f}%)\033[0m [TTFT: {ttft_ms:.0f}ms, {tokens_per_sec:.1f} tps]")
+                print(f"\033[32mPASS ({avg_score:.0f}%)\033[0m {metrics_str}")
             elif avg_score > 0:
-                print(f"\033[33mPARTIEL ({avg_score:.0f}%)\033[0m [TTFT: {ttft_ms:.0f}ms]")
+                print(f"\033[33mPARTIEL ({avg_score:.0f}%)\033[0m {metrics_str}")
             else:
-                print(f"\033[31mFAIL (0%)\033[0m [TTFT: {ttft_ms:.0f}ms]")
+                print(f"\033[31mFAIL (0%)\033[0m {metrics_str}")
 
             if verbose:
                 for ass in assertions:
@@ -364,6 +378,7 @@ def run_benchmark_for_model_profile(
                 tokens_per_sec=0.0,
                 response_text="",
                 assertions=[],
+                thinking_tokens=0,
                 error=str(e),
             )
 
@@ -380,12 +395,18 @@ def run_benchmark_for_model_profile(
         suite_result.avg_ttft_ms = (sum(valid_ttfts) / len(valid_ttfts)) if valid_ttfts else 0.0
         suite_result.avg_tokens_per_sec = (sum(valid_tps) / len(valid_tps)) if valid_tps else 0.0
 
+        suite_result.total_duration_sec = sum(t.total_latency_ms for t in suite_result.test_results) / 1000.0
+        suite_result.total_tokens_generated = sum(t.tokens_generated for t in suite_result.test_results)
+        suite_result.total_thinking_tokens = sum(t.thinking_tokens for t in suite_result.test_results)
+
     for cat, scores in category_scores_map.items():
         suite_result.category_scores[cat] = sum(scores) / len(scores)
 
+    think_summary = f" (🧠 {suite_result.total_thinking_tokens} pensée)" if suite_result.total_thinking_tokens > 0 else ""
     print(
         f"   ⭐ Score Global : \033[1;35m{suite_result.overall_score:.1f} / 100\033[0m "
-        f"(TTFT moy: {suite_result.avg_ttft_ms:.0f}ms, TPS: {suite_result.avg_tokens_per_sec:.1f})"
+        f"[Durée: {suite_result.total_duration_sec:.1f}s | Tokens: {suite_result.total_tokens_generated}{think_summary} | "
+        f"TTFT moy: {suite_result.avg_ttft_ms:.0f}ms, TPS: {suite_result.avg_tokens_per_sec:.1f}]"
     )
 
     client.unload()

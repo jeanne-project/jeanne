@@ -120,6 +120,7 @@ class LlmClient:
         t_start = time.perf_counter()
         t_first_token: Optional[float] = None
         collected_chunks: List[str] = []
+        reasoning_chunks: List[str] = []
 
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
@@ -136,7 +137,12 @@ class LlmClient:
                             choices = chunk_json.get("choices", [])
                             if choices:
                                 delta = choices[0].get("delta", {})
+                                reasoning = delta.get("reasoning_content", "")
                                 content = delta.get("content", "")
+                                if reasoning:
+                                    if t_first_token is None:
+                                        t_first_token = time.perf_counter()
+                                    reasoning_chunks.append(reasoning)
                                 if content:
                                     if t_first_token is None:
                                         t_first_token = time.perf_counter()
@@ -151,11 +157,16 @@ class LlmClient:
 
         t_end = time.perf_counter()
 
-        response_text = "".join(collected_chunks)
+        if reasoning_chunks:
+            response_text = f"<think>\n{''.join(reasoning_chunks)}\n</think>\n" + "".join(collected_chunks)
+        else:
+            response_text = "".join(collected_chunks)
+
         ttft_ms = ((t_first_token - t_start) * 1000.0) if t_first_token else ((t_end - t_start) * 1000.0)
         total_latency_ms = (t_end - t_start) * 1000.0
 
-        tokens_count = max(len(collected_chunks), int(len(response_text.split()) * 1.33))
+        total_chunks_count = len(collected_chunks) + len(reasoning_chunks)
+        tokens_count = max(total_chunks_count, int(len(response_text.split()) * 1.33))
         if tokens_count == 0:
             tokens_count = 1
 
@@ -171,6 +182,7 @@ class LlmClient:
     ) -> Tuple[str, float, float, int, float]:
         """Generates realistic deterministic responses for dry-run verification."""
         last_msg = messages[-1]["content"].lower()
+        is_reasoning = any(k in self.model.lower() for k in ["r1", "qwq", "think", "reasoning"])
 
         time.sleep(0.05)
         ttft_ms = 45.0 + (params.temperature * 10.0)
@@ -242,7 +254,17 @@ class LlmClient:
         else:
             resp = "Réponse simulée de test pour l'assistant Jeanne."
 
-        tokens_count = len(resp.split())
+        if is_reasoning:
+            think_prefix = (
+                "<think>\n"
+                "Analyse minutieuse de la requête de l'utilisateur...\n"
+                "Considération des contraintes imposées par l'assistant Jeanne et respect strict des règles.\n"
+                "Élaboration d'une réponse optimale étape par étape afin de respecter la syntaxe requise.\n"
+                "</think>\n"
+            )
+            resp = think_prefix + resp
+
+        tokens_count = int(len(resp.split()) * 1.33) if is_reasoning else len(resp.split())
         total_latency_ms = ttft_ms + (tokens_count * 15.0)
         tokens_per_sec = tokens_count / max(0.01, (total_latency_ms - ttft_ms) / 1000.0)
 

@@ -26,10 +26,12 @@ Cet outil permet de mesurer rigoureusement l'adéquation, la fiabilité et les p
    - **Relecture & Correction (`/corrige`)** : Remédiation orthographique, grammaticale et syntaxique de phrases erronées en préservant le ton et sans aucun bavardage parasite.
    - **Synthèse de Réunion** : Extraction de résumés exécutifs et de cases à cocher `- [ ] @Nom: action`.
    - **Concision & Limite KV** : Respect de limites de mots sous contexte chargé (simulation du plafond 4096 tokens).
-5. **Métriques Physiques & Fonctionnelles** :
+5. **Métriques Physiques, Temporelles & Gestion du Cache KV** :
+   - **Durée Totale & Latence** : Temps d'exécution précis pour chaque test individuel et durée totale cumulée de la suite.
+   - **Tokens Générés & Détection du Bloat de Réflexion (`<think>`)** : Décompte précis des tokens générés totaux et isolement des tokens de monologue intérieur (`thinking_tokens` des modèles de type DeepSeek-R1 ou QwQ). Les modèles générant des centaines de tokens de réflexion pour des requêtes simples sont immédiatement pénalisés dans le verdict car ils saturent le cache KV ($n_{\text{ctx}} \le 4096$) et détruisent la réactivité de la palette flottante (< 50 ms), même avec 100% de score fonctionnel.
    - **TTFT (Time-To-First-Token)** : Latence du premier token émis via flux SSE / in-process.
    - **TPS (Tokens/sec)** : Débit de génération effectif.
-   - **Scores par catégorie** et **Jeanne Suitability Score** global.
+   - **Scores par catégorie** et **Jeanne Suitability Score** global avec verdict matériel explicite.
 6. **Rapports Prêts pour GitHub** :
    - Génération simultanée d'un rapport en **Markdown** (tableaux synthétiques, badges et sections repliables) et en **JSON** (données brutes pour archivage ou CI).
 
