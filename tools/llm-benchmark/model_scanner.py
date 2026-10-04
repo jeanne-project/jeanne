@@ -66,7 +66,12 @@ def scan_models_directory(
     Filters out empty files, vision mmproj files, and MTP auxiliary adapters.
     Returns a list of model configuration dictionaries.
     """
-    profiles = default_profiles or ["deterministic_strict", "balanced_temp03"]
+    profiles = default_profiles if default_profiles is not None else [
+        "default_gguf",
+        "deterministic_strict",
+        "balanced_temp03",
+        "creative_temp07",
+    ]
     discovered_models = []
 
     if not os.path.exists(models_dir):
@@ -118,7 +123,12 @@ def probe_ollama_models(
     """
     Attempts to probe an active local Ollama daemon for installed models.
     """
-    profiles = default_profiles or ["deterministic_strict", "balanced_temp03"]
+    profiles = default_profiles if default_profiles is not None else [
+        "default_gguf",
+        "deterministic_strict",
+        "balanced_temp03",
+        "creative_temp07",
+    ]
     url = f"{endpoint.rstrip('/')}/api/tags"
     discovered = []
 
@@ -157,7 +167,12 @@ def get_default_recommended_models(
     default_profiles: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Fallback models list recommended for the Jeanne project."""
-    profiles = default_profiles or ["deterministic_strict", "balanced_temp03"]
+    profiles = default_profiles if default_profiles is not None else [
+        "default_gguf",
+        "deterministic_strict",
+        "balanced_temp03",
+        "creative_temp07",
+    ]
     return [
         {
             "id": "qwen2.5:3b-instruct-q4_k_m",
@@ -171,7 +186,7 @@ def get_default_recommended_models(
             "display_name": "Llama 3.2 3B Instruct (Q4_K_M)",
             "endpoint": default_endpoint,
             "timeout_secs": 60,
-            "profiles": ["deterministic_strict"],
+            "profiles": list(profiles),
         },
         {
             "id": "gpt-4o-mini",
@@ -179,6 +194,6 @@ def get_default_recommended_models(
             "endpoint": "https://api.openai.com/v1",
             "api_key_env": "OPENAI_API_KEY",
             "timeout_secs": 30,
-            "profiles": ["deterministic_strict"],
+            "profiles": list(profiles),
         },
     ]

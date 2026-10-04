@@ -138,16 +138,23 @@ class EmbeddedGgufEngine:
         t_first_token: Optional[float] = None
         collected_chunks: List[str] = []
 
-        stream = self._llm.create_chat_completion(
-            messages=messages,
-            temperature=params.temperature,
-            top_p=params.top_p,
-            max_tokens=params.max_tokens,
-            seed=params.seed,
-            frequency_penalty=params.frequency_penalty,
-            presence_penalty=params.presence_penalty,
-            stream=True,
-        )
+        completion_kwargs: Dict[str, Any] = {
+            "messages": messages,
+            "max_tokens": params.max_tokens,
+            "stream": True,
+        }
+        if params.temperature is not None:
+            completion_kwargs["temperature"] = params.temperature
+        if params.top_p is not None:
+            completion_kwargs["top_p"] = params.top_p
+        if params.seed is not None:
+            completion_kwargs["seed"] = params.seed
+        if params.frequency_penalty is not None and params.frequency_penalty != 0.0:
+            completion_kwargs["frequency_penalty"] = params.frequency_penalty
+        if params.presence_penalty is not None and params.presence_penalty != 0.0:
+            completion_kwargs["presence_penalty"] = params.presence_penalty
+
+        stream = self._llm.create_chat_completion(**completion_kwargs)
 
         for chunk in stream:
             choices = chunk.get("choices", [])
@@ -194,10 +201,12 @@ class EmbeddedGgufEngine:
             "-m", self.model_path,
             "-p", full_prompt,
             "-n", str(params.max_tokens),
-            "--temp", str(params.temperature),
-            "--top-p", str(params.top_p),
             "-c", str(self.n_ctx),
         ]
+        if params.temperature is not None:
+            cmd.extend(["--temp", str(params.temperature)])
+        if params.top_p is not None:
+            cmd.extend(["--top-p", str(params.top_p)])
         if params.seed is not None:
             cmd.extend(["-s", str(params.seed)])
         if self.use_vulkan:

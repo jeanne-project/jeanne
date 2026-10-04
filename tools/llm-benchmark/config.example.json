@@ -1,6 +1,14 @@
 {
   "hardware_profile": "PC 16 Go RAM / AMD Ryzen 7 7840HS / Radeon 780M iGPU (Vulkan)",
   "inference_profiles": {
+    "default_gguf": {
+      "temperature": null,
+      "seed": null,
+      "top_p": null,
+      "max_tokens": 1024,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    },
     "deterministic_strict": {
       "temperature": 0.0,
       "seed": 42,
@@ -33,7 +41,12 @@
       "endpoint": "http://localhost:11434/v1",
       "api_key": null,
       "timeout_secs": 60,
-      "profiles": ["deterministic_strict", "balanced_temp03"]
+      "profiles": [
+        "default_gguf",
+        "deterministic_strict",
+        "balanced_temp03",
+        "creative_temp07"
+      ]
     },
     {
       "id": "llama3.2:3b-instruct-q4_k_m",
@@ -41,7 +54,12 @@
       "endpoint": "http://localhost:11434/v1",
       "api_key": null,
       "timeout_secs": 60,
-      "profiles": ["deterministic_strict"]
+      "profiles": [
+        "default_gguf",
+        "deterministic_strict",
+        "balanced_temp03",
+        "creative_temp07"
+      ]
     },
     {
       "id": "gpt-4o-mini",
@@ -49,7 +67,12 @@
       "endpoint": "https://api.openai.com/v1",
       "api_key_env": "OPENAI_API_KEY",
       "timeout_secs": 30,
-      "profiles": ["deterministic_strict"]
+      "profiles": [
+        "default_gguf",
+        "deterministic_strict",
+        "balanced_temp03",
+        "creative_temp07"
+      ]
     }
   ]
 }

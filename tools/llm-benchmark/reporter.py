@@ -7,6 +7,23 @@ from typing import Any, Dict, List
 from suites.base import BenchmarkSuiteResult, TestResult
 
 
+def format_param_report(param_key: str, val: Any) -> str:
+    """Formate une valeur d'hyperparamètre, en annotant explicitement les valeurs par défaut avec '(par défaut)'."""
+    if val is None:
+        if param_key == "temperature":
+            return "0.8 (par défaut)"
+        elif param_key == "top_p":
+            return "0.95 (par défaut)"
+        elif param_key == "seed":
+            return "non fixé (par défaut)"
+        elif param_key in ("frequency_penalty", "presence_penalty"):
+            return "0.0 (par défaut)"
+        return "défaut (par défaut)"
+    if isinstance(val, float):
+        return f"{val}"
+    return str(val)
+
+
 def compute_verdict(suite: BenchmarkSuiteResult) -> str:
     """Computes a hardware & project suitability verdict based on Jeanne's criteria."""
     score = suite.overall_score
@@ -93,12 +110,12 @@ class BenchmarkReporter:
             if p_name not in seen_profiles:
                 seen_profiles.add(p_name)
                 p = suite.inference_params
-                temp = p.get("temperature", 0.0)
-                seed = p.get("seed", "None")
-                top_p = p.get("top_p", 1.0)
+                temp = format_param_report("temperature", p.get("temperature"))
+                seed = format_param_report("seed", p.get("seed"))
+                top_p = format_param_report("top_p", p.get("top_p"))
                 max_t = p.get("max_tokens", 1024)
-                freq = p.get("frequency_penalty", 0.0)
-                pres = p.get("presence_penalty", 0.0)
+                freq = format_param_report("frequency_penalty", p.get("frequency_penalty", 0.0))
+                pres = format_param_report("presence_penalty", p.get("presence_penalty", 0.0))
                 lines.append(f"| **`{p_name}`** | `{temp}` | `{seed}` | `{top_p}` | `{max_t}` | `{freq} / {pres}` |")
         lines.append("")
 
@@ -143,7 +160,14 @@ class BenchmarkReporter:
             lines.append(f"<summary><b>{suite.model_display_name}</b> (Profil: <code>{suite.profile_name}</code>) - Score : <b>{suite.overall_score:.1f}%</b></summary>")
             lines.append("")
             lines.append(f"- **ID Modèle** : `{suite.model_id}`")
-            lines.append(f"- **Paramètres d'inférence** : `{json.dumps(suite.inference_params)}`")
+            p = suite.inference_params
+            p_desc = (
+                f"temperature: {format_param_report('temperature', p.get('temperature'))}, "
+                f"seed: {format_param_report('seed', p.get('seed'))}, "
+                f"top_p: {format_param_report('top_p', p.get('top_p'))}, "
+                f"max_tokens: {p.get('max_tokens', 1024)}"
+            )
+            lines.append(f"- **Paramètres d'inférence** : `{p_desc}`")
             lines.append(f"- **Durée totale cumulée** : `{suite.total_duration_sec:.2f} s`")
             think_info = f" (dont `{suite.total_thinking_tokens}` tokens de réflexion)" if suite.total_thinking_tokens > 0 else ""
             lines.append(f"- **Volume total généré** : `{suite.total_tokens_generated} tokens`{think_info}")
@@ -205,6 +229,14 @@ class BenchmarkReporter:
                 "model_display_name": s.model_display_name,
                 "profile_name": s.profile_name,
                 "inference_params": s.inference_params,
+                "resolved_params": {
+                    "temperature": format_param_report("temperature", s.inference_params.get("temperature")),
+                    "seed": format_param_report("seed", s.inference_params.get("seed")),
+                    "top_p": format_param_report("top_p", s.inference_params.get("top_p")),
+                    "max_tokens": s.inference_params.get("max_tokens", 1024),
+                    "frequency_penalty": format_param_report("frequency_penalty", s.inference_params.get("frequency_penalty", 0.0)),
+                    "presence_penalty": format_param_report("presence_penalty", s.inference_params.get("presence_penalty", 0.0)),
+                },
                 "overall_score": round(s.overall_score, 2),
                 "total_duration_sec": round(s.total_duration_sec, 2),
                 "total_tokens_generated": s.total_tokens_generated,

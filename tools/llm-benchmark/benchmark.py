@@ -17,7 +17,11 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 from client import LlmClient
-from config_template import DEFAULT_INFERENCE_PROFILES, build_benchmark_config
+from config_template import (
+    DEFAULT_INFERENCE_PROFILES,
+    build_benchmark_config,
+    build_profiles_from_specs,
+)
 from embedded_engine import EmbeddedGgufEngine
 from environment_setup import (
     check_and_relaunch_in_venv,
@@ -64,13 +68,31 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
 def parse_inference_profile(profile_dict: Dict[str, Any]) -> InferenceParams:
     """Parses a dictionary into an InferenceParams dataclass."""
+    raw_temp = profile_dict.get("temperature")
+    temp = float(raw_temp) if raw_temp is not None else None
+
+    raw_seed = profile_dict.get("seed")
+    seed = int(raw_seed) if raw_seed is not None else None
+
+    raw_top_p = profile_dict.get("top_p")
+    top_p = float(raw_top_p) if raw_top_p is not None else None
+
+    raw_max_tokens = profile_dict.get("max_tokens")
+    max_tokens = int(raw_max_tokens) if raw_max_tokens is not None else 1024
+
+    raw_freq = profile_dict.get("frequency_penalty")
+    freq = float(raw_freq) if raw_freq is not None else 0.0
+
+    raw_pres = profile_dict.get("presence_penalty")
+    pres = float(raw_pres) if raw_pres is not None else 0.0
+
     return InferenceParams(
-        temperature=float(profile_dict.get("temperature", 0.0)),
-        seed=profile_dict.get("seed", 42),
-        top_p=float(profile_dict.get("top_p", 1.0)),
-        max_tokens=int(profile_dict.get("max_tokens", 1024)),
-        frequency_penalty=float(profile_dict.get("frequency_penalty", 0.0)),
-        presence_penalty=float(profile_dict.get("presence_penalty", 0.0)),
+        temperature=temp,
+        seed=seed,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        frequency_penalty=freq,
+        presence_penalty=pres,
     )
 
 
@@ -110,7 +132,20 @@ def execute_init(args: argparse.Namespace) -> None:
     has_embedded, embedded_desc = EmbeddedGgufEngine.is_available()
     print(f"   • Moteur GGUF embarqué (In-Process) : {'✔️ ' + embedded_desc if has_embedded else '⚪ Non installé (pip install llama-cpp-python)'}")
 
-    # 2. Découverte des modèles
+    # 2. Configuration des profils d'inférence
+    if getattr(args, "profiles", None):
+        try:
+            inference_profiles_dict = build_profiles_from_specs(args.profiles)
+        except Exception as e:
+            print(f"❌ Erreur lors de la configuration des profils (--profil) : {e}")
+            sys.exit(1)
+    else:
+        inference_profiles_dict = DEFAULT_INFERENCE_PROFILES
+
+    active_profile_names = list(inference_profiles_dict.keys())
+    print(f"\n⚙️  Profils d'inférence configurés ({len(active_profile_names)}) : {active_profile_names}")
+
+    # 3. Découverte des modèles
     models: List[Dict[str, Any]] = []
 
     if args.models_dir:
@@ -118,6 +153,7 @@ def execute_init(args: argparse.Namespace) -> None:
         discovered = scan_models_directory(
             models_dir=args.models_dir,
             default_endpoint=args.endpoint,
+            default_profiles=active_profile_names,
         )
         if discovered:
             print(f"   ✔️ {len(discovered)} modèle(s) éligible(s) retenu(s) pour le benchmark :")
@@ -127,10 +163,10 @@ def execute_init(args: argparse.Namespace) -> None:
         else:
             print("   ℹ️  Aucun fichier de modèle éligible (.gguf, .bin, .safetensors) trouvé dans ce dossier.")
 
-    # 3. Sonde Ollama si aucun dossier ou pas de modèles trouvés
+    # 4. Sonde Ollama si aucun dossier ou pas de modèles trouvés
     if not models and not args.no_probe:
         print("\n🦙 Vérification de la présence d'un serveur Ollama local actif...")
-        ollama_models = probe_ollama_models(default_profiles=["deterministic_strict", "balanced_temp03"])
+        ollama_models = probe_ollama_models(default_profiles=active_profile_names)
         if ollama_models:
             print(f"   ✔️ {len(ollama_models)} modèle(s) détecté(s) sur Ollama :")
             for m in ollama_models:
@@ -139,18 +175,21 @@ def execute_init(args: argparse.Namespace) -> None:
         else:
             print("   ℹ️  Serveur Ollama non détecté ou aucun modèle téléchargé.")
 
-    # 4. Modèles de référence recommandés si rien n'a été découvert
+    # 5. Modèles de référence recommandés si rien n'a été découvert
     if not models:
         print("\n📦 Inclusion des modèles de référence recommandés pour Jeanne...")
-        models = get_default_recommended_models(default_endpoint=args.endpoint)
+        models = get_default_recommended_models(
+            default_endpoint=args.endpoint,
+            default_profiles=active_profile_names,
+        )
         for m in models:
             print(f"   - {m['display_name']} (Endpoint: {m['endpoint']})")
 
-    # 5. Construction de la configuration finale
+    # 6. Construction de la configuration finale
     config_dict = build_benchmark_config(
         hardware_summary=hw_summary,
         models=models,
-        custom_profiles=DEFAULT_INFERENCE_PROFILES,
+        custom_profiles=inference_profiles_dict,
     )
 
     # Création du dossier parent si nécessaire
@@ -163,7 +202,7 @@ def execute_init(args: argparse.Namespace) -> None:
     print("✅ CONFIGURATION INITIALISÉE AVEC SUCCÈS !")
     print("=" * 70)
     print(f"📄 Fichier généré : \033[1;32m{output_path}\033[0m")
-    print(f"⚙️  Profils d'inférence configurés : {list(DEFAULT_INFERENCE_PROFILES.keys())}")
+    print(f"⚙️  Profils d'inférence configurés : {active_profile_names}")
     print(f"🤖 Modèles configurés : {len(models)}")
     print("\n👉 Vous pouvez dès à présent lancer le benchmark avec :")
     print("   python3 tools/llm-benchmark/benchmark.py")
@@ -575,6 +614,17 @@ def main():
     init_parser.add_argument(
         "--venv",
         help="Sonder ou initialiser sous un environnement virtuel spécifique (ex: cuda, vulkan, cpu, .venv-cuda)",
+    )
+    init_parser.add_argument(
+        "--profil",
+        "--profile",
+        dest="profiles",
+        action="append",
+        help=(
+            "Spécifie un profil d'inférence à générer (cumulable : default, deterministic, balanced, creative). "
+            "Exemples : --profil default --profil deterministic --profil deterministic,seed=465 "
+            "--profil balanced,temperature=0.4,seed=42"
+        ),
     )
 
     # Sub-command: setup

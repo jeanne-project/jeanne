@@ -10,30 +10,28 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 @dataclass
 class InferenceParams:
     """Hyperparameters used for LLM generation. Recorded to guarantee determinism and reproducibility."""
-    temperature: float = 0.0
+    temperature: Optional[float] = 0.0
     seed: Optional[int] = 42
-    top_p: float = 1.0
+    top_p: Optional[float] = 1.0
     max_tokens: int = 1024
-    frequency_penalty: float = 0.0
-    presence_penalty: float = 0.0
+    frequency_penalty: Optional[float] = 0.0
+    presence_penalty: Optional[float] = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
-        data = {
+        return {
             "temperature": self.temperature,
             "seed": self.seed,
             "top_p": self.top_p,
             "max_tokens": self.max_tokens,
-            "frequency_penalty": self.frequency_penalty,
-            "presence_penalty": self.presence_penalty,
+            "frequency_penalty": self.frequency_penalty if self.frequency_penalty is not None else 0.0,
+            "presence_penalty": self.presence_penalty if self.presence_penalty is not None else 0.0,
         }
-        return {k: v for k, v in data if v is not None} if False else data
 
     def summary_str(self) -> str:
-        s = f"temp={self.temperature}"
-        if self.seed is not None:
-            s += f", seed={self.seed}"
-        s += f", top_p={self.top_p}, max_tokens={self.max_tokens}"
-        return s
+        temp_str = f"temp={self.temperature}" if self.temperature is not None else "temp=0.8 (par défaut)"
+        seed_str = f", seed={self.seed}" if self.seed is not None else ", seed=non fixé (par défaut)"
+        top_p_str = f", top_p={self.top_p}" if self.top_p is not None else ", top_p=0.95 (par défaut)"
+        return f"{temp_str}{seed_str}{top_p_str}, max_tokens={self.max_tokens}"
 
 
 @dataclass

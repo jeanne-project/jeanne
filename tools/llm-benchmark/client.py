@@ -92,19 +92,21 @@ class LlmClient:
     ) -> Tuple[str, float, float, int, float]:
         """Streaming chat completion over HTTP."""
         url = f"{self.endpoint}/chat/completions"
-        payload = {
+        payload: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "temperature": params.temperature,
-            "top_p": params.top_p,
             "max_tokens": params.max_tokens,
         }
+        if params.temperature is not None:
+            payload["temperature"] = params.temperature
+        if params.top_p is not None:
+            payload["top_p"] = params.top_p
         if params.seed is not None:
             payload["seed"] = params.seed
-        if params.frequency_penalty != 0.0:
+        if params.frequency_penalty is not None and params.frequency_penalty != 0.0:
             payload["frequency_penalty"] = params.frequency_penalty
-        if params.presence_penalty != 0.0:
+        if params.presence_penalty is not None and params.presence_penalty != 0.0:
             payload["presence_penalty"] = params.presence_penalty
 
         headers = {
@@ -185,7 +187,8 @@ class LlmClient:
         is_reasoning = any(k in self.model.lower() for k in ["r1", "qwq", "think", "reasoning"])
 
         time.sleep(0.05)
-        ttft_ms = 45.0 + (params.temperature * 10.0)
+        eff_temp = params.temperature if params.temperature is not None else 0.8
+        ttft_ms = 45.0 + (eff_temp * 10.0)
 
         if "quel est le rôle de la base de données sqlite" in last_msg:
             resp = (
