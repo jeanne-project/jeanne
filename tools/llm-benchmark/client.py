@@ -1,4 +1,4 @@
-"""Universal OpenAI-compatible client for streaming inference, latency & TTFT measurement."""
+"""Universal client supporting both in-process embedded llama.cpp execution and remote HTTP endpoints."""
 
 import json
 import os
@@ -7,25 +7,35 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
+from embedded_engine import EmbeddedGgufEngine
 from suites.base import InferenceParams
 
 
 class LlmClient:
-    """Client for testing OpenAI-compatible endpoints with exact TTFT and token timing."""
+    """
+    Unified LLM Client capable of:
+    1. Direct embedded GGUF inference (using in-process llama.cpp Vulkan / CPU bindings).
+    2. Remote / local daemon streaming inference via OpenAI-compatible HTTP (/v1).
+    """
 
     def __init__(
         self,
-        endpoint: str,
-        model: str,
+        endpoint: Optional[str] = None,
+        model: str = "default",
+        file_path: Optional[str] = None,
+        engine: str = "auto",  # "embedded", "http", "auto"
         api_key: Optional[str] = None,
         api_key_env: Optional[str] = None,
         timeout: float = 60.0,
         mock_mode: bool = False,
+        use_vulkan: bool = True,
     ):
-        self.endpoint = endpoint.rstrip("/")
+        self.endpoint = endpoint.rstrip("/") if endpoint else None
         self.model = model
+        self.file_path = file_path
         self.timeout = timeout
         self.mock_mode = mock_mode
+        self.use_vulkan = use_vulkan
 
         if api_key:
             self.api_key = api_key
@@ -34,19 +44,53 @@ class LlmClient:
         else:
             self.api_key = None
 
+        # Decide whether to use embedded engine or HTTP
+        self.is_embedded = False
+        self.embedded_engine: Optional[EmbeddedGgufEngine] = None
+
+        if not self.mock_mode:
+            if engine == "embedded" or (
+                engine == "auto"
+                and self.file_path
+                and os.path.exists(self.file_path)
+                and (not self.endpoint or self.endpoint.startswith("embedded"))
+            ):
+                self.is_embedded = True
+                self.embedded_engine = EmbeddedGgufEngine(
+                    model_path=self.file_path,
+                    n_ctx=4096,
+                    use_vulkan=self.use_vulkan,
+                )
+
     def generate(
         self,
         messages: List[Dict[str, str]],
         params: InferenceParams,
     ) -> Tuple[str, float, float, int, float]:
         """
-        Executes a streaming chat completion.
+        Executes generation either via in-process embedded llama.cpp or HTTP SSE.
         Returns:
             (response_text, ttft_ms, total_latency_ms, tokens_count, tokens_per_sec)
         """
         if self.mock_mode:
             return self._mock_generate(messages, params)
 
+        if self.is_embedded and self.embedded_engine:
+            return self.embedded_engine.generate(messages, params)
+
+        if not self.endpoint:
+            raise ValueError(
+                f"Aucun endpoint HTTP ni fichier GGUF valide spécifié pour le modèle '{self.model}'."
+            )
+
+        return self._http_generate(messages, params)
+
+    def _http_generate(
+        self,
+        messages: List[Dict[str, str]],
+        params: InferenceParams,
+    ) -> Tuple[str, float, float, int, float]:
+        """Streaming chat completion over HTTP."""
         url = f"{self.endpoint}/chat/completions"
         payload = {
             "model": self.model,
@@ -111,8 +155,6 @@ class LlmClient:
         ttft_ms = ((t_first_token - t_start) * 1000.0) if t_first_token else ((t_end - t_start) * 1000.0)
         total_latency_ms = (t_end - t_start) * 1000.0
 
-        # Estimate tokens generated: count words / 0.75 or exact chunks if present
-        # In GGUF / OpenAI chunks, each delta is usually 1 token or a subword.
         tokens_count = max(len(collected_chunks), int(len(response_text.split()) * 1.33))
         if tokens_count == 0:
             tokens_count = 1
@@ -130,7 +172,7 @@ class LlmClient:
         """Generates realistic deterministic responses for dry-run verification."""
         last_msg = messages[-1]["content"].lower()
 
-        time.sleep(0.05)  # Simulate network / execution
+        time.sleep(0.05)
         ttft_ms = 45.0 + (params.temperature * 10.0)
 
         if "quel est le rôle de la base de données sqlite" in last_msg:
@@ -197,3 +239,8 @@ class LlmClient:
         tokens_per_sec = tokens_count / max(0.01, (total_latency_ms - ttft_ms) / 1000.0)
 
         return resp, ttft_ms, total_latency_ms, tokens_count, tokens_per_sec
+
+    def unload(self) -> None:
+        """Frees model from RAM/VRAM if running embedded engine."""
+        if self.embedded_engine:
+            self.embedded_engine.unload()

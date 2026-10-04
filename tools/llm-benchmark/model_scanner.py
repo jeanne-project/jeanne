@@ -20,8 +20,9 @@ def format_file_size(size_bytes: int) -> str:
 
 def scan_models_directory(
     models_dir: str,
-    default_endpoint: str = "http://localhost:11434/v1",
+    default_endpoint: Optional[str] = None,
     default_profiles: Optional[List[str]] = None,
+    use_embedded_engine: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Recursively scans the given directory for GGUF/model files.
@@ -47,12 +48,14 @@ def scan_models_directory(
 
                 model_id = os.path.splitext(fname)[0]
                 display_name = f"{model_id} ({size_str})"
+                engine_type = "embedded" if use_embedded_engine else "http"
 
                 discovered_models.append(
                     {
                         "id": model_id,
                         "display_name": display_name,
-                        "endpoint": default_endpoint,
+                        "engine": engine_type,
+                        "endpoint": default_endpoint if not use_embedded_engine else None,
                         "file_path": full_path,
                         "size": size_str,
                         "timeout_secs": 60,

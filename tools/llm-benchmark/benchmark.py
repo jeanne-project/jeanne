@@ -18,6 +18,13 @@ if current_dir not in sys.path:
 
 from client import LlmClient
 from config_template import DEFAULT_INFERENCE_PROFILES, build_benchmark_config
+from embedded_engine import EmbeddedGgufEngine
+from environment_setup import (
+    check_and_relaunch_in_venv,
+    create_and_setup_venv,
+    get_available_backend_profiles,
+    get_venv_python_path,
+)
 from hardware_detector import detect_host_hardware
 from model_scanner import (
     get_default_recommended_models,
@@ -87,6 +94,8 @@ def execute_init(args: argparse.Namespace) -> None:
     print(f"   • Mémoire vive (RAM) : {hw['ram_gb']} Go")
     print(f"   • Graphismes / GPU : {hw['gpu']}")
     print(f"   • Accélération matérielle : {'Oui (Vulkan/Metal)' if hw['hardware_acceleration'] else 'CPU uniquement'}")
+    has_embedded, embedded_desc = EmbeddedGgufEngine.is_available()
+    print(f"   • Moteur GGUF embarqué (In-Process) : {'✔️ ' + embedded_desc if has_embedded else '⚪ Non installé (pip install llama-cpp-python)'}")
 
     # 2. Découverte des modèles
     models: List[Dict[str, Any]] = []
@@ -149,6 +158,99 @@ def execute_init(args: argparse.Namespace) -> None:
 
 
 # ==============================================================================
+# SUB-COMMAND: SETUP (Préparation d'environnements virtuels CUDA / Vulkan / CPU)
+# ==============================================================================
+
+def execute_setup(args: argparse.Namespace) -> None:
+    """Prepares isolated Python virtual environments with specialized llama.cpp builds."""
+    print("\n" + "=" * 70)
+    print("   🛠️  PRÉPARATION DE L'ENVIRONNEMENT D'INFÉRENCE LOCAL")
+    print("=" * 70)
+
+    hw = detect_host_hardware()
+    print(f"🖥️  Matériel détecté : {hw['summary']}")
+    print(f"🎮 Accélération graphique : {hw['gpu']}")
+
+    available_profiles = get_available_backend_profiles()
+
+    print("\n📋 Configurations d'environnements disponibles pour votre matériel :")
+    for idx, p in enumerate(available_profiles, start=1):
+        rec_tag = " \033[1;32m(Recommandé)\033[0m" if p.is_recommended else ""
+        print(f"   [{idx}] \033[1m{p.id.upper()}\033[0m - {p.display_name}{rec_tag}")
+        print(f"       Dossier venv : {p.venv_name}")
+        print(f"       Description  : {p.description}")
+
+    if getattr(args, "list", False):
+        print("\nOption --list activée. Fin de la commande setup.")
+        return
+
+    chosen_backend = getattr(args, "backend", None)
+
+    # Mode interactif si aucun backend spécifié et stdin est un terminal tty
+    if not chosen_backend and sys.stdin.isatty():
+        print("\n👉 Quel environnement souhaitez-vous préparer ?")
+        print("   Entrez un numéro, l'identifiant (ex: cuda, vulkan, cpu) ou 'all' pour tous : ", end="", flush=True)
+        try:
+            user_input = sys.stdin.readline().strip().lower()
+            if user_input in ("all", "tous", "*"):
+                chosen_backend = "all"
+            elif user_input.isdigit() and 1 <= int(user_input) <= len(available_profiles):
+                chosen_backend = available_profiles[int(user_input) - 1].id
+            elif any(p.id == user_input for p in available_profiles):
+                chosen_backend = user_input
+            else:
+                print("❌ Choix invalide.")
+                sys.exit(1)
+        except Exception:
+            chosen_backend = None
+
+    if not chosen_backend:
+        print("\nℹ️  Aucun backend spécifié. Vous pouvez préparer un environnement avec :")
+        for p in available_profiles:
+            print(f"   python3 tools/llm-benchmark/benchmark.py setup --backend {p.id}")
+        print("   python3 tools/llm-benchmark/benchmark.py setup --backend all")
+        return
+
+    if chosen_backend.lower() == "all":
+        profiles_to_install = available_profiles
+    else:
+        matched = [p for p in available_profiles if p.id.lower() == chosen_backend.lower()]
+        if not matched:
+            print(f"❌ Backend inconnu '{chosen_backend}'. Disponibles : {[p.id for p in available_profiles]}")
+            sys.exit(1)
+        profiles_to_install = matched
+
+    dry_run = getattr(args, "dry_run", False)
+    successful_venvs = []
+
+    for prof in profiles_to_install:
+        ok, venv_res = create_and_setup_venv(
+            profile=prof,
+            base_dir=current_dir,
+            dry_run=dry_run,
+        )
+        if ok:
+            successful_venvs.append((prof, venv_res))
+
+    print("\n" + "=" * 70)
+    print("🎉 PRÉPARATION TERMINÉE !")
+    print("=" * 70)
+    if not dry_run and successful_venvs:
+        print("💡 Pour exécuter votre benchmark dans un environnement spécifique :")
+        for prof, venv_dir in successful_venvs:
+            print(f"\n👉 Backend \033[1m{prof.id.upper()}\033[0m :")
+            print(f"   • En une seule commande :")
+            print(f"     python3 tools/llm-benchmark/benchmark.py run --venv {prof.id}")
+            print(f"   • Ou en activant manuellement le venv :")
+            if platform.system() == "Windows":
+                print(f"     {venv_dir}\\Scripts\\activate")
+            else:
+                print(f"     source {venv_dir}/bin/activate")
+            print(f"     python3 tools/llm-benchmark/benchmark.py")
+    print("=" * 70 + "\n")
+
+
+# ==============================================================================
 # SUB-COMMAND: RUN (Exécution du benchmark)
 # ==============================================================================
 
@@ -168,16 +270,22 @@ def run_benchmark_for_model_profile(
     api_key_env = model_cfg.get("api_key_env")
     timeout = float(model_cfg.get("timeout_secs", 60.0))
 
+    file_path = model_cfg.get("file_path")
+    engine = model_cfg.get("engine", "auto")
+
     client = LlmClient(
         endpoint=endpoint,
         model=model_id,
+        file_path=file_path,
+        engine=engine,
         api_key=api_key,
         api_key_env=api_key_env,
         timeout=timeout,
         mock_mode=mock_mode,
     )
 
-    print(f"\n🚀 Lancement du benchmark pour : \033[1m{display_name}\033[0m")
+    engine_tag = " [Moteur Embarqué GGUF]" if client.is_embedded else f" [Endpoint: {endpoint}]"
+    print(f"\n🚀 Lancement du benchmark pour : \033[1m{display_name}\033[0m{engine_tag}")
     print(f"   ⚙️  Profil: \033[36m{profile_name}\033[0m ({params.summary_str()})")
     print(f"   🌐 Endpoint: {endpoint}")
 
@@ -280,11 +388,17 @@ def run_benchmark_for_model_profile(
         f"(TTFT moy: {suite_result.avg_ttft_ms:.0f}ms, TPS: {suite_result.avg_tokens_per_sec:.1f})"
     )
 
+    client.unload()
     return suite_result
 
 
 def execute_run(args: argparse.Namespace) -> None:
     """Executes the benchmark matrix and generates reports."""
+    # Basculer automatiquement sur le virtualenv spécifié si demandé
+    target_venv = getattr(args, "venv", None)
+    if target_venv:
+        check_and_relaunch_in_venv(target_venv, current_dir)
+
     try:
         config = load_config(args.config)
     except Exception as e:
@@ -420,6 +534,26 @@ def main():
         help="Ne pas sonder le serveur Ollama local",
     )
 
+    # Sub-command: setup
+    setup_parser = subparsers.add_parser("setup", help="Préparer les environnements virtuels isolés (CUDA, Vulkan, CPU)")
+    setup_parser.add_argument(
+        "--backend",
+        "-b",
+        choices=["cuda", "vulkan", "cpu", "metal", "all"],
+        help="Backend spécifique à configurer (ex: cuda, vulkan, cpu, all)",
+    )
+    setup_parser.add_argument(
+        "--list",
+        "-l",
+        action="store_true",
+        help="Lister les profils d'environnement disponibles pour la machine hôte",
+    )
+    setup_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Afficher les commandes sans créer les environnements virtuels ni installer de paquets",
+    )
+
     # Sub-command: run
     run_parser = subparsers.add_parser("run", help="Exécuter les benchmarks")
     for p in [parser, run_parser]:
@@ -432,6 +566,10 @@ def main():
             "-c",
             default=DEFAULT_CONFIG_FILE,
             help="Chemin vers le fichier de configuration JSON (défaut: config.json)",
+        )
+        p.add_argument(
+            "--venv",
+            help="Exécuter le benchmark dans un environnement virtuel spécifique (ex: cuda, vulkan, cpu, .venv-cuda)",
         )
         p.add_argument(
             "--models",
@@ -465,10 +603,13 @@ def main():
             help="Affichage détaillé des assertions en console",
         )
 
-    # If argv has 'init', use parsed command. Otherwise default to 'run'.
+    # Command dispatching
     if len(sys.argv) > 1 and sys.argv[1] == "init":
         args = parser.parse_args()
         execute_init(args)
+    elif len(sys.argv) > 1 and sys.argv[1] == "setup":
+        args = parser.parse_args()
+        execute_setup(args)
     elif len(sys.argv) > 1 and sys.argv[1] == "run":
         args = parser.parse_args()
         execute_run(args)

@@ -13,19 +13,23 @@ Cet outil permet de mesurer rigoureusement l'adéquation, la fiabilité et les p
 1. **Reproductibilité & Déterminisme Absolu** :
    - Évaluation programmatique stricte sans « LLM-as-a-judge » : expressions régulières, validateurs JSON, analyseurs de citations et détection de mots-clés de rejet.
    - Tous les hyperparamètres d'inférence (`temperature`, `seed`, `top_p`, `max_tokens`, etc.) sont appliqués de manière contrôlée et explicitement consignés dans chaque rapport.
-2. **Support Multi-Profils d'Inférence** :
+2. **Moteur d'Inférence Embarqué Direct (In-Process GGUF)** :
+   - Capable d'exécuter des fichiers `.gguf` directement en mémoire **sans aucun serveur externe ni intermédiaire réseau** grâce aux bindings natifs `llama.cpp`.
+   - Conforme au runtime de Jeanne : contexte KV borné à 4096 tokens, accélération matérielle Vulkan/Metal/CUDA et libération immédiate de la RAM à la fin du test.
+   - Supporte également le mode distant ou démon (Ollama, `llama-server`, LM Studio, OpenAI) via l'interface `/v1`.
+3. **Support Multi-Profils d'Inférence** :
    - Permet d'exécuter des séries de tests avec différents profils (ex. `deterministic_strict` à $T=0.0$, `balanced` à $T=0.3$, etc.) sur un même modèle ou plusieurs modèles.
-3. **Cas d'Usage Réels de Jeanne** :
+4. **Cas d'Usage Réels de Jeanne** :
    - **RAG & Citations** : Synthèse sous contrainte avec obligation de citer `[source: nom_note.md]` et refus propre sans hallucination pour les questions hors-domaine.
    - **Préservation PII** : Rétention stricte des tokens masqués (`[PERSON_1]`, `[EMAIL_1]`, etc.) sans corruption.
    - **Sortie Structurée Palette** : Génération de JSON strict sans texte d'enrobage pour les commandes rapides.
    - **Synthèse de Réunion** : Extraction de résumés exécutifs et de cases à cocher `- [ ] @Nom: action`.
    - **Concision & Limite KV** : Respect de limites de mots sous contexte chargé (simulation du plafond 4096 tokens).
-4. **Métriques Physiques & Fonctionnelles** :
-   - **TTFT (Time-To-First-Token)** : Latence du premier token émis via flux SSE.
+5. **Métriques Physiques & Fonctionnelles** :
+   - **TTFT (Time-To-First-Token)** : Latence du premier token émis via flux SSE / in-process.
    - **TPS (Tokens/sec)** : Débit de génération effectif.
    - **Scores par catégorie** et **Jeanne Suitability Score** global.
-5. **Rapports Prêts pour GitHub** :
+6. **Rapports Prêts pour GitHub** :
    - Génération simultanée d'un rapport en **Markdown** (tableaux synthétiques, badges et sections repliables) et en **JSON** (données brutes pour archivage ou CI).
 
 ---
@@ -34,46 +38,66 @@ Cet outil permet de mesurer rigoureusement l'adéquation, la fiabilité et les p
 
 ### Prérequis
 - Python 3.10 ou supérieur.
-- Zéro bibliothèque externe requise (fonctionne à 100% avec la bibliothèque standard Python).
-- Un serveur d'inférence OpenAI-compatible actif (ex: [Ollama](https://ollama.com/), `llama-server`, [LM Studio](https://lmstudio.ai/)) OU une clé API pour un service distant.
+- Pour exécuter des fichiers GGUF sans aucun serveur externe (mode embarqué) :
+  ```bash
+  # Option 1 - NVIDIA GPU (CUDA précompilé sans compilation - ultra-rapide) :
+  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+  # (ou cu121 / cu122 selon votre version CUDA installée)
 
-### 1. Tester l'outil en mode simulation (Dry-Run)
-Pour vérifier le bon fonctionnement de la suite et observer la génération des rapports sans serveur actif :
+  # Option 2 - Vulkan (recommandé pour Jeanne sur iGPU AMD Radeon / Intel Iris Xe ou NVIDIA Vulkan) :
+  CMAKE_ARGS="-DGGML_VULKAN=on" pip install llama-cpp-python
+
+  # Option 3 - CPU standard :
+  pip install llama-cpp-python
+  ```
+- Si vous préférez tester via un serveur externe ou une API : Ollama, `llama-server` ou clé API distante.
+
+### 1. Préparer vos Environnements Isolés (`setup`)
+Pour tester plusieurs backends matériels sur la même machine (par exemple comparer **CUDA vs Vulkan vs CPU** sur NVIDIA, ou **Vulkan vs CPU** sur iGPU) sans conflit de dépendances, l'outil gère des virtualenvs (`venv`) dédiés :
 
 ```bash
-python3 tools/llm-benchmark/benchmark.py --mock
+# Voir les environnements disponibles pour votre matériel :
+python3 tools/llm-benchmark/benchmark.py setup --list
+
+# Préparer un environnement spécifique (crée le venv et installe llama-cpp-python avec les bons flags) :
+python3 tools/llm-benchmark/benchmark.py setup --backend cuda     # NVIDIA CUDA
+python3 tools/llm-benchmark/benchmark.py setup --backend vulkan   # Vulkan (AMD/Intel/NVIDIA)
+python3 tools/llm-benchmark/benchmark.py setup --backend cpu      # CPU standard
+
+# Tout préparer en une seule commande :
+python3 tools/llm-benchmark/benchmark.py setup --backend all
+
+# Mode interactif (menu de sélection) :
+python3 tools/llm-benchmark/benchmark.py setup
 ```
 
-Les rapports seront générés dans le dossier `tools/llm-benchmark/reports/`.
-
----
-
-### 1. Initialisation Automatique (`init`)
-L'outil propose une commande `init` qui sonde automatiquement votre matériel (CPU, RAM, GPU/Vulkan) et prépare la configuration de base avec les profils d'inférence recommandés :
+### 2. Initialisation Automatique de la Configuration (`init`)
+Sonde votre matériel et prépare la configuration de test à partir de vos modèles :
 
 ```bash
 # Initialisation simple (détection du hardware + modèles recommandés ou Ollama local) :
 python3 tools/llm-benchmark/benchmark.py init
 
-# Initialisation en scannant un dossier local contenant vos modèles GGUF :
+# Initialisation en scannant un dossier local contenant vos fichiers .gguf :
 python3 tools/llm-benchmark/benchmark.py init --models-dir /chemin/vers/mes/modeles/
-
-# Options disponibles pour init :
-#   --models-dir, -d : Dossier à scanner récursivement (.gguf, .bin, .safetensors)
-#   --endpoint, -e   : URL d'inférence par défaut (défaut: http://localhost:11434/v1)
-#   --output, -o     : Fichier de sortie (défaut: config.json)
-#   --force, -f      : Écraser la configuration existante
-#   --no-probe       : Ne pas sonder le serveur Ollama local
 ```
 
-### 2. Tester en mode simulation (Dry-Run)
-Pour vérifier le bon fonctionnement de la suite et observer la génération des rapports sans serveur actif :
+### 3. Exécuter le Benchmark avec l'Environnement de votre Choix
+Vous pouvez exécuter le benchmark directement dans un environnement isolé sans même avoir à l'activer manuellement :
 
 ```bash
-python3 tools/llm-benchmark/benchmark.py --mock
-```
+# Exécution sous l'environnement CUDA :
+python3 tools/llm-benchmark/benchmark.py run --venv cuda
 
-Les rapports seront générés dans le dossier `tools/llm-benchmark/reports/`.
+# Exécution sous l'environnement Vulkan (conditions Jeanne) :
+python3 tools/llm-benchmark/benchmark.py run --venv vulkan
+
+# Exécution sous l'environnement CPU de référence :
+python3 tools/llm-benchmark/benchmark.py run --venv cpu
+
+# Tester en mode simulation (sans modèle ni GPU) :
+python3 tools/llm-benchmark/benchmark.py run --mock
+```
 
 ---
 

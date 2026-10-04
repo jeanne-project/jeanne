@@ -30,8 +30,11 @@ coverage/
 # Python / Benchmark Tool
 __pycache__/
 *.py[cod]
-.venv/
+.venv*/
 venv/
+venvs/
+tools/llm-benchmark/venvs/
+tools/llm-benchmark/.venv*/
 tools/llm-benchmark/reports/
 tools/llm-benchmark/config.json
 
