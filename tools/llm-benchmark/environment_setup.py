@@ -504,26 +504,28 @@ def check_and_relaunch_in_venv(
     if os.path.normcase(current_python) == os.path.normcase(target_python_abs):
         return False
 
-    # Build new argv, filtering out --venv argument to prevent loop
-    new_argv = [target_python_abs]
+    # Build new argv, preserving the script path (sys.argv[0]) and filtering out --venv
+    script_path = os.path.abspath(sys.argv[0])
+    filtered_args: List[str] = []
     skip_next = False
     for arg in sys.argv[1:]:
         if skip_next:
             skip_next = False
             continue
-        if arg in ("--venv", "-v"):
+        if arg == "--venv":
             skip_next = True
             continue
         if arg.startswith("--venv="):
             continue
-        new_argv.append(arg)
+        filtered_args.append(arg)
 
+    new_argv = [target_python_abs, script_path] + filtered_args
     os.environ["JEANNE_BENCHMARK_RELAUNCHED"] = "1"
 
     if platform.system() == "Windows":
         # Windows compatibility: subprocess.call + exit ensures reliable execution
         try:
-            ret = subprocess.call([target_python_abs] + new_argv[1:])
+            ret = subprocess.call(new_argv)
             sys.exit(ret)
         except Exception as e:
             print(f"❌ Échec de relance dans le venv sous Windows : {e}")
