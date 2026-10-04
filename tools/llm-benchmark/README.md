@@ -1,39 +1,40 @@
 # 🧠 Jeanne LLM Benchmark Tool
 
-Outil indépendant et déterministe d'évaluation des modèles de langage (LLMs) pour le projet **Jeanne**.
+Outil indépendant et déterministe d'évaluation des modèles de langage (LLMs) pour l'écosystème **Jeanne**.
 
-Cet outil permet de mesurer rigoureusement l'adéquation, la fiabilité et les performances (TTFT, débit TPS, respect des formats, citations RAG, préservation PII) de différents LLMs (locaux ou distants) en fonction de votre matériel.
+Cet outil mesure rigoureusement l'adéquation fonctionnelle et matérielle des modèles de langage (locaux ou distants) face aux exigences réelles de Jeanne : latence premier token (TTFT), débit de génération (TPS), durée d'exécution totale, consommation de tokens, détection du bloat de réflexion (`<think>`), respect des schémas JSON, citations RAG et préservation PII.
 
-> 🛡️ **Isolation Garantie** : Cet outil ne dépend d'aucun code interne de Jeanne et n'est pas embarqué dans son build (`Cargo.lock` / Tauri). Il ne modifie aucun fichier de configuration ni aucun coffre utilisateur.
+> 🛡️ **Isolation Garantie** : Cet outil ne dépend d'aucun code interne de Jeanne et n'est pas embarqué dans son build de production (`Cargo.lock` / Tauri). Il n'altère aucun fichier du coffre utilisateur ni aucun index SQLite.
 
 ---
 
 ## 🎯 Fonctionnalités Clés
 
 1. **Reproductibilité & Déterminisme Absolu** :
-   - Évaluation programmatique stricte sans « LLM-as-a-judge » : expressions régulières, validateurs JSON, analyseurs de citations et détection de mots-clés de rejet.
-   - Tous les hyperparamètres d'inférence (`temperature`, `seed`, `top_p`, `max_tokens`, etc.) sont appliqués de manière contrôlée et explicitement consignés dans chaque rapport.
-2. **Moteur d'Inférence Embarqué Direct (In-Process GGUF)** :
-   - Capable d'exécuter des fichiers `.gguf` directement en mémoire **sans aucun serveur externe ni intermédiaire réseau** grâce aux bindings natifs `llama.cpp`.
-   - Conforme au runtime de Jeanne : contexte KV borné à 4096 tokens, accélération matérielle Vulkan/Metal/CUDA et libération immédiate de la RAM à la fin du test.
-   - Supporte également le mode distant ou démon (Ollama, `llama-server`, LM Studio, OpenAI) via l'interface `/v1`.
-3. **Support Multi-Profils d'Inférence** :
-   - Permet d'exécuter des séries de tests avec différents profils (ex. `deterministic_strict` à $T=0.0$, `balanced` à $T=0.3$, etc.) sur un même modèle ou plusieurs modèles.
-4. **Cas d'Usage Réels de Jeanne** :
-   - **RAG & Citations** : Synthèse sous contrainte avec obligation de citer `[source: nom_note.md]` et refus propre sans hallucination pour les questions hors-domaine.
-   - **Préservation PII** : Rétention stricte des tokens masqués (`[PERSON_1]`, `[EMAIL_1]`, etc.) sans corruption.
-   - **Sortie Structurée Palette** : Génération de JSON strict sans texte d'enrobage pour les commandes rapides.
-   - **Relecture & Correction (`/corrige`)** : Remédiation orthographique, grammaticale et syntaxique de phrases erronées en préservant le ton et sans aucun bavardage parasite.
-   - **Synthèse de Réunion** : Extraction de résumés exécutifs et de cases à cocher `- [ ] @Nom: action`.
-   - **Concision & Limite KV** : Respect de limites de mots sous contexte chargé (simulation du plafond 4096 tokens).
-5. **Métriques Physiques, Temporelles & Gestion du Cache KV** :
-   - **Durée Totale & Latence** : Temps d'exécution précis pour chaque test individuel et durée totale cumulée de la suite.
-   - **Tokens Générés & Détection du Bloat de Réflexion (`<think>`)** : Décompte précis des tokens générés totaux et isolement des tokens de monologue intérieur (`thinking_tokens` des modèles de type DeepSeek-R1 ou QwQ). Les modèles générant des centaines de tokens de réflexion pour des requêtes simples sont immédiatement pénalisés dans le verdict car ils saturent le cache KV ($n_{\text{ctx}} \le 4096$) et détruisent la réactivité de la palette flottante (< 50 ms), même avec 100% de score fonctionnel.
-   - **TTFT (Time-To-First-Token)** : Latence du premier token émis via flux SSE / in-process.
-   - **TPS (Tokens/sec)** : Débit de génération effectif.
-   - **Scores par catégorie** et **Jeanne Suitability Score** global avec verdict matériel explicite.
-6. **Rapports Prêts pour GitHub** :
-   - Génération simultanée d'un rapport en **Markdown** (tableaux synthétiques, badges et sections repliables) et en **JSON** (données brutes pour archivage ou CI).
+   - Évaluation programmatique stricte sans « LLM-as-a-judge » : expressions régulières, parseurs JSON stricts, analyseurs d'exactitude de citations et vérification de non-hallucination.
+   - Tous les hyperparamètres d'inférence (`temperature`, `seed`, `top_p`, `max_tokens`, etc.) sont enregistrés dans la configuration et restitués de manière transparente dans les rapports.
+2. **Profils par Défaut GGUF (`default_gguf` & valeurs natives)** :
+   - Prise en charge des valeurs `null` pour hériter fidèlement des hyperparamètres définis nativement dans le fichier GGUF ou par le serveur d'inférence (température, top_p, seed).
+   - Indication explicite de la valeur retenue avec la mention `(par défaut)` dans les tableaux de reproductibilité Markdown et dans les données JSON (`resolved_params`).
+3. **Générateur de Profils d'Inférence CLI (`--profil`)** :
+   - Définition succincte et cumulable de profils à la volée lors de l'initialisation : `default`, `deterministic`, `balanced`, `creative`.
+   - Tirage aléatoire contrôlé dans les plages recommandées et possibilité de surcharges explicites (ex: `,temperature=0.4,seed=42`).
+   - Fixation des graines et paramètres directement dans le `config.json` pour garantir une reproductibilité parfaite.
+4. **Attribution Exhaustive des Profils aux Modèles** :
+   - Tous les profils configurés sont automatiquement assignés à l'ensemble des modèles éligibles (GGUF locaux, Ollama ou modèles recommandés).
+5. **Filtrage Intelligent des Fichiers Modèles** :
+   - Exclusion automatique des téléchargements incomplets ou fichiers vides (`0 octet`, `.part`), des encodeurs vision multimodaux (`mmproj`), et des modules de spéculation multi-tokens (`mtp`).
+6. **Moteur Embarqué Direct (In-Process GGUF via `llama.cpp`)** :
+   - Exécution directe en mémoire des fichiers `.gguf` sans aucun intermédiaire réseau ni démon HTTP actif.
+   - Conforme au runtime Jeanne : plafond KV strict à 4096 tokens, accélération matérielle Vulkan/CUDA/Metal et déchargement immédiat de la RAM/VRAM à l'issue des tests.
+   - Supporte également le mode HTTP compatible OpenAI `/v1` (Ollama, `llama-server`, LM Studio, OpenAI, etc.).
+7. **Gestion Multi-Environnements & Virtualenvs (`venv`)** :
+   - Préparation assistée et bascule automatique vers des environnements virtuels isolés pour tester plusieurs backends sans conflits de DLL (CUDA, Vulkan, CPU).
+8. **Métriques Physiques, Temporelles & Alerte Surcharge de Réflexion** :
+   - **Durée Totale & Latence** : Chronométrage précis par test et durée cumulée par configuration.
+   - **Volume de Tokens & Détection `<think>`** : Détection des tokens de réflexion (modèles DeepSeek-R1, QwQ non calibrés). Les modèles générant une réflexion excessive sont alertés car ils saturent le cache KV ($n_{\text{ctx}} \le 4096$) et détruisent la réactivité de la palette (< 50 ms).
+   - **TTFT & Débit TPS** : Latence du premier token émis et débit réel en tokens/seconde.
+   - **Suite `/corrige`** : Évaluation dédiée à la remédiation orthographique et grammaticale sans bavardage parasite.
 
 ---
 
@@ -41,79 +42,157 @@ Cet outil permet de mesurer rigoureusement l'adéquation, la fiabilité et les p
 
 ### Prérequis
 - Python 3.10 ou supérieur.
-- Pour exécuter des fichiers GGUF sans aucun serveur externe (mode embarqué) :
+- Pour exécuter des modèles GGUF directement sans serveur externe :
   ```bash
-  # Option 1 - NVIDIA GPU (CUDA précompilé sans compilation - ultra-rapide) :
+  # NVIDIA CUDA (roue précompilée, ultra-rapide) :
   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
-  # (ou cu121 / cu122 selon votre version CUDA installée)
 
-  # Option 2 - Vulkan (recommandé pour Jeanne sur iGPU AMD Radeon / Intel Iris Xe ou NVIDIA Vulkan) :
+  # Vulkan (AMD Radeon, Intel Iris Xe, NVIDIA Vulkan) :
   CMAKE_ARGS="-DGGML_VULKAN=on" pip install llama-cpp-python
 
-  # Option 3 - CPU standard :
+  # CPU standard :
   pip install llama-cpp-python
   ```
-- Si vous préférez tester via un serveur externe ou une API : Ollama, `llama-server` ou clé API distante.
+
+---
+
+## 🛠️ Guide d'Utilisation & Exemples
 
 ### 1. Préparer vos Environnements Isolés (`setup`)
-Pour tester plusieurs backends matériels sur la même machine (par exemple comparer **CUDA vs Vulkan vs CPU** sur NVIDIA, ou **Vulkan vs CPU** sur iGPU) sans conflit de dépendances, l'outil gère des virtualenvs (`venv`) dédiés :
+
+Pour comparer plusieurs accélérations matérielles sur la même machine sans conflit de dépendances :
 
 ```bash
-# Voir les environnements disponibles pour votre matériel :
+# Lister les environnements recommandés pour votre matériel hôte :
 python3 tools/llm-benchmark/benchmark.py setup --list
 
-# Préparer un environnement spécifique (crée le venv et installe llama-cpp-python avec les bons flags) :
-python3 tools/llm-benchmark/benchmark.py setup --backend cuda     # NVIDIA CUDA
-python3 tools/llm-benchmark/benchmark.py setup --backend vulkan   # Vulkan (AMD/Intel/NVIDIA)
-python3 tools/llm-benchmark/benchmark.py setup --backend cpu      # CPU standard
+# Installer l'environnement NVIDIA CUDA :
+python3 tools/llm-benchmark/benchmark.py setup --backend cuda
+
+# Installer l'environnement Vulkan (conditions Jeanne) :
+python3 tools/llm-benchmark/benchmark.py setup --backend vulkan
+
+# Installer la référence CPU :
+python3 tools/llm-benchmark/benchmark.py setup --backend cpu
 
 # Tout préparer en une seule commande :
 python3 tools/llm-benchmark/benchmark.py setup --backend all
 
-# Mode interactif (menu de sélection) :
+# Mode interactif pas-à-pas :
 python3 tools/llm-benchmark/benchmark.py setup
-```
-
-### 2. Initialisation Automatique de la Configuration (`init`)
-Sonde votre matériel et prépare la configuration de test à partir de vos modèles :
-
-```bash
-# Initialisation simple (détection du hardware + modèles recommandés ou Ollama local) :
-python3 tools/llm-benchmark/benchmark.py init
-
-# Initialisation en scannant un dossier local contenant vos fichiers .gguf :
-python3 tools/llm-benchmark/benchmark.py init --models-dir /chemin/vers/mes/modeles/
-```
-
-> 💡 **Filtrage Intelligent** : La commande `init` ignore automatiquement les fichiers vides ou en cours de téléchargement (0 octet, `.part`), les projecteurs multimodaux pour la vision (`mmproj`) et les modules auxiliaires de spéculation (`mtp`), garantissant que seuls les modèles de langage textuels complets et exécutables sont retenus.
-
-### 3. Exécuter le Benchmark avec l'Environnement de votre Choix
-Vous pouvez exécuter le benchmark directement dans un environnement isolé sans même avoir à l'activer manuellement :
-
-```bash
-# Exécution sous l'environnement CUDA :
-python3 tools/llm-benchmark/benchmark.py run --venv cuda
-
-# Exécution sous l'environnement Vulkan (conditions Jeanne) :
-python3 tools/llm-benchmark/benchmark.py run --venv vulkan
-
-# Exécution sous l'environnement CPU de référence :
-python3 tools/llm-benchmark/benchmark.py run --venv cpu
-
-# Tester en mode simulation (sans modèle ni GPU) :
-python3 tools/llm-benchmark/benchmark.py run --mock
 ```
 
 ---
 
-## ⚙️ Structure de Configuration (`config.json`)
+### 2. Initialiser la Configuration (`init`)
 
-Le fichier `config.json` produit automatiquement ressemble à ceci :
+La commande `init` sonde votre matériel, recherche vos modèles et génère un fichier `config.json`.
+
+#### Exemple A : Initialisation standard (profils par défaut)
+Configure les 4 profils de référence (`default_gguf`, `deterministic_strict`, `balanced_temp03`, `creative_temp07`) :
+```bash
+python3 tools/llm-benchmark/benchmark.py init
+```
+
+#### Exemple B : Scanner un dossier de modèles locaux GGUF
+Scanne récursivement vos fichiers `.gguf` en ignorant automatiquement les fichiers temporaires, `mmproj` et `mtp` :
+```bash
+python3 tools/llm-benchmark/benchmark.py init --models-dir /chemin/vers/mes/modeles/ -f
+```
+
+#### Exemple C : Générer des profils personnalisés avec `--profil`
+Vous pouvez passer l'argument `--profil` (ou `--profile`) plusieurs fois pour créer des variantes d'inférence spécifiques :
+```bash
+python3 tools/llm-benchmark/benchmark.py init \
+  --models-dir /chemin/vers/mes/modeles/ \
+  --profil default \
+  --profil deterministic \
+  --profil deterministic,seed=465 \
+  --profil balanced,temperature=0.4,seed=42 \
+  --profil creative,presence_penalty=0.2,name=creative_custom \
+  --force
+```
+
+#### 📋 Syntaxe des types de profils `--profil` :
+
+| Type | Comportement par défaut | Paramètres générés / Plages |
+| :--- | :--- | :--- |
+| `default` | Valeurs natives du GGUF / serveur | `temperature=null`, `seed=null`, `top_p=null` |
+| `deterministic` | Mode déterministe strict | `temperature=0.0`, `top_p=1.0`, `seed` aléatoire ou fixé |
+| `balanced` | Équilibré pour tâches courantes | `temp` $\in [0.2, 0.4]$, `top_p` $\in [0.85, 0.95]$, `seed` aléatoire |
+| `creative` | Créatif / brainstorming | `temp` $\in [0.65, 0.85]$, `top_p` $\in [0.90, 0.98]$, pénalités $\in [0.05, 0.15]$ |
+
+> 💡 **Surcharges Précises** : Séparez les surcharges par des virgules : `,clé=valeur` (ex: `temperature=0.35`, `seed=1234`, `top_p=0.9`, `max_tokens=2048`, `name=mon_profil`). Les graines aléatoires générées sont gravées dans `config.json` pour garantir que les tests ultérieurs restent 100% reproductibles.
+
+---
+
+### 3. Exécuter le Benchmark (`run`)
+
+Le benchmark s'exécute soit via la sous-commande `run`, soit directement à la racine du script.
+
+#### Exemple A : Exécution directe (détection automatique du meilleur venv)
+Détecte automatiquement votre GPU et bascule en toute transparence sur l'environnement adapté (ex. CUDA ou Vulkan) s'il existe :
+```bash
+python3 tools/llm-benchmark/benchmark.py run
+```
+
+#### Exemple B : Exécution ciblée sous un venv spécifique
+```bash
+# Exécution sous CUDA :
+python3 tools/llm-benchmark/benchmark.py run --venv cuda
+
+# Exécution sous Vulkan :
+python3 tools/llm-benchmark/benchmark.py run --venv vulkan
+
+# Exécution sous CPU :
+python3 tools/llm-benchmark/benchmark.py run --venv cpu
+```
+
+#### Exemple C : Filtrer par modèle et par profil
+```bash
+# Ne tester qu'un modèle spécifique sous un profil précis :
+python3 tools/llm-benchmark/benchmark.py run \
+  --models qwen2.5:3b-instruct-q4_k_m \
+  --profiles default_gguf,deterministic_strict
+```
+
+#### Exemple D : Filtrer par suites de tests
+```bash
+# Exécuter uniquement le RAG et la correction orthographique /corrige :
+python3 tools/llm-benchmark/benchmark.py run --suites rag,corrige
+```
+*Suites disponibles* : `rag`, `pii`, `structured`, `meeting`, `conciseness`, `corrige`.
+
+#### Exemple E : Mode simulation sèche (`--mock`)
+Permet de vérifier toute la matrice de tests et de générer un rapport complet sans nécessiter de GPU ni de modèle téléchargé :
+```bash
+python3 tools/llm-benchmark/benchmark.py run --mock
+```
+
+#### Exemple F : Mode verbeux avec assertions en direct (`-v`)
+Affiche le détail de chaque assertion unitaire validée en console :
+```bash
+python3 tools/llm-benchmark/benchmark.py run --verbose
+```
+
+---
+
+## ⚙️ Structure du Fichier `config.json`
+
+Le fichier de configuration généré par `init` :
 
 ```json
 {
   "hardware_profile": "AMD Ryzen 7 7840HS (16 threads) | 16.0 Go RAM | GPU: AMD Radeon 780M (Vulkan)",
   "inference_profiles": {
+    "default_gguf": {
+      "temperature": null,
+      "seed": null,
+      "top_p": null,
+      "max_tokens": 1024,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    },
     "deterministic_strict": {
       "temperature": 0.0,
       "seed": 42,
@@ -141,60 +220,66 @@ Le fichier `config.json` produit automatiquement ressemble à ceci :
   },
   "models": [
     {
-      "id": "qwen2.5:3b-instruct-q4_k_m",
-      "display_name": "Qwen 2.5 3B (Q4_K_M)",
-      "endpoint": "http://localhost:11434/v1",
-      "profiles": ["deterministic_strict", "balanced_temp03"]
+      "id": "qwen2.5-3b-instruct-q4_k_m",
+      "display_name": "qwen2.5-3b-instruct-q4_k_m (2.1 Go)",
+      "engine": "embedded",
+      "endpoint": null,
+      "file_path": "/chemin/vers/qwen2.5-3b-instruct-q4_k_m.gguf",
+      "size": "2.1 Go",
+      "timeout_secs": 60,
+      "profiles": [
+        "default_gguf",
+        "deterministic_strict",
+        "balanced_temp03",
+        "creative_temp07"
+      ]
     }
   ]
 }
 ```
 
+---
+
+## 📊 Rapports & Publication
+
+Les rapports sont automatiquement générés dans `tools/llm-benchmark/reports/` avec horodatage :
+- `benchmark_report_YYYY-MM-DD_HHMMSS.md` : Rapport complet GitHub-Flavored Markdown.
+- `benchmark_report_YYYY-MM-DD_HHMMSS.json` : Données brutes machine-readable pour archivage et benchmarks comparatifs.
+
+### Extrait du Tableau de Reproductibilité Produit :
+
+| Profil | Temperature | Seed | Top-P | Max Tokens | Penalties (Freq / Pres) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`default_gguf`** | `0.8 (par défaut)` | `non fixé (par défaut)` | `0.95 (par défaut)` | `1024` | `0.0 / 0.0` |
+| **`deterministic_strict`** | `0.0` | `42` | `1.0` | `1024` | `0.0 / 0.0` |
+| **`balanced_temp03`** | `0.3` | `42` | `0.9` | `1024` | `0.0 / 0.0` |
+
+### Critères de Verdict Jeanne :
+- 🟢 **Excellent (Idéal pour Jeanne)** : Score $\ge 90\%$, débit $\ge 20$ tps, TTFT $\le 350$ ms, aucun bloat de réflexion.
+- 🟡 **Acceptable (Performances viables)** : Score $\ge 80\%$, débit $\ge 15$ tps, TTFT $\le 600$ ms.
+- ⚠️ **Non viable (Surcharge de réflexion)** : $\ge 250$ tokens de monologue intérieur ou $>25\%$ du volume total, saturant le contexte KV 4096.
+- 🔴 **Non Recommandé** : Échec fonctionnel ou modèle trop lent.
 
 ---
 
-## 📖 Commandes et Options CLI
+## 📖 Récapitulatif des Options CLI
 
-Lancer le benchmark complet :
-```bash
-python3 tools/llm-benchmark/benchmark.py
-```
-
-Filtrer sur un ou plusieurs modèles spécifiques :
-```bash
-python3 tools/llm-benchmark/benchmark.py --models qwen2.5:3b-instruct-q4_k_m
-```
-
-Filtrer sur un profil d'inférence précis :
-```bash
-python3 tools/llm-benchmark/benchmark.py --profiles deterministic_strict
-```
-
-Filtrer sur des suites de tests particulières :
-```bash
-python3 tools/llm-benchmark/benchmark.py --suites rag,pii
-```
-
-Activer l'affichage verbeux des assertions en direct :
-```bash
-python3 tools/llm-benchmark/benchmark.py --verbose
-```
-
----
-
-## 📤 Publication des Résultats sur GitHub
-
-Les rapports sont automatiquement enregistrés sous `tools/llm-benchmark/reports/` avec un nom horodaté :
-- `benchmark_report_YYYY-MM-DD_HHMMSS.md`
-- `benchmark_report_YYYY-MM-DD_HHMMSS.json`
-
-Pour partager vos résultats avec la communauté ou les intégrer au dépôt Jeanne :
-1. Renommez ou déplacez le fichier `.md` (par exemple vers `docs/benchmarks/benchmark_mon_pc.md`).
-2. Faites un commit :
-   ```bash
-   git add tools/llm-benchmark/reports/
-   git commit -m "docs(benchmark): add LLM evaluation report for Ryzen 7840HS"
-   git push origin main
-   ```
-
-Le rapport Markdown est directement lisible sur l'interface GitHub avec ses tableaux formatés, ses statuts et ses détails repliables.
+| Commande | Option | Description |
+| :--- | :--- | :--- |
+| `setup` | `-b, --backend <id>` | Backend à installer (`cuda`, `vulkan`, `cpu`, `metal`, `all`) |
+| `setup` | `-l, --list` | Liste les profils d'environnement compatibles avec l'hôte |
+| `setup` | `--dry-run` | Affiche les commandes pip/venv sans les exécuter |
+| `init` | `-o, --output <path>` | Chemin du fichier de configuration (défaut: `config.json`) |
+| `init` | `-f, --force` | Écrase le fichier de configuration existant |
+| `init` | `--models-dir <path>` | Dossier local à scanner pour découvrir les fichiers `.gguf` |
+| `init` | `--profil <spec>` | Spécifie un profil d'inférence à générer (cumulable) |
+| `init` | `--no-probe` | Désactive la détection du serveur local Ollama |
+| `run` | `-c, --config <path>` | Chemin du fichier de configuration JSON |
+| `run` | `--venv <id>` | Exécute sous un environnement virtuel spécifique (`cuda`, `vulkan`, `cpu`) |
+| `run` | `--no-auto-venv` | Désactive la bascule automatique sur un virtualenv détecté |
+| `run` | `-m, --models <ids>` | Liste d'identifiants de modèles à tester (séparés par des virgules) |
+| `run` | `-p, --profiles <ids>` | Liste de profils à exécuter (séparés par des virgules) |
+| `run` | `-s, --suites <names>` | Suites à lancer (`rag`, `pii`, `structured`, `meeting`, `conciseness`, `corrige`) |
+| `run` | `--mock` | Exécution en simulation déterministe sans GPU ni modèle |
+| `run` | `-v, --verbose` | Affichage détaillé en console de chaque assertion |
+| `run` | `--output-dir <path>` | Répertoire de destination des rapports (défaut: `reports/`) |
