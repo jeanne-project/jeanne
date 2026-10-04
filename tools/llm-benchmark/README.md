@@ -35,6 +35,7 @@ Cet outil mesure rigoureusement l'adéquation fonctionnelle et matérielle des m
    - **Volume de Tokens & Détection `<think>`** : Détection des tokens de réflexion (modèles DeepSeek-R1, QwQ non calibrés). Les modèles générant une réflexion excessive sont alertés car ils saturent le cache KV ($n_{\text{ctx}} \le 4096$) et détruisent la réactivité de la palette (< 50 ms).
    - **TTFT & Débit TPS** : Latence du premier token émis et débit réel en tokens/seconde.
    - **Suite `/corrige`** : Évaluation dédiée à la remédiation orthographique et grammaticale sans bavardage parasite.
+   - **Suite Actions Palette IA (`palette`)** : Évaluation des actions de productivité au presse-papier (`/rephrase`, `/tldr`, `/trad`, `/todo`, `/bookmark` de `04b_SPEC_PALETTE_PRODUCTIVITY_ACTIONS.md`) avec contrôle strict du zéro bavardage, du format markdown et des contraintes de concision.
 
 ---
 
@@ -158,10 +159,10 @@ python3 tools/llm-benchmark/benchmark.py run \
 
 #### Exemple D : Filtrer par suites de tests
 ```bash
-# Exécuter uniquement le RAG et la correction orthographique /corrige :
-python3 tools/llm-benchmark/benchmark.py run --suites rag,corrige
+# Exécuter uniquement le RAG, la correction et la palette IA :
+python3 tools/llm-benchmark/benchmark.py run --suites rag,corrige,palette
 ```
-*Suites disponibles* : `rag`, `pii`, `structured`, `meeting`, `conciseness`, `corrige`.
+*Suites disponibles* : `rag`, `pii`, `structured`, `meeting`, `conciseness`, `corrige`, `palette` (ou `actions`).
 
 #### Exemple E : Mode simulation sèche (`--mock`)
 Permet de vérifier toute la matrice de tests et de générer un rapport complet sans nécessiter de GPU ni de modèle téléchargé :
@@ -279,7 +280,7 @@ Les rapports sont automatiquement générés dans `tools/llm-benchmark/reports/`
 | `run` | `--no-auto-venv` | Désactive la bascule automatique sur un virtualenv détecté |
 | `run` | `-m, --models <ids>` | Liste d'identifiants de modèles à tester (séparés par des virgules) |
 | `run` | `-p, --profiles <ids>` | Liste de profils à exécuter (séparés par des virgules) |
-| `run` | `-s, --suites <names>` | Suites à lancer (`rag`, `pii`, `structured`, `meeting`, `conciseness`, `corrige`) |
+| `run` | `-s, --suites <names>` | Suites à lancer (`rag`, `pii`, `structured`, `meeting`, `conciseness`, `corrige`, `palette`) |
 | `run` | `--mock` | Exécution en simulation déterministe sans GPU ni modèle |
 | `run` | `-v, --verbose` | Affichage détaillé en console de chaque assertion |
 | `run` | `--output-dir <path>` | Répertoire de destination des rapports (défaut: `reports/`) |

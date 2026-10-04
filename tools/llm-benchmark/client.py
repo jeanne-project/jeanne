@@ -254,6 +254,24 @@ class LlmClient:
             resp = "Je vous contacte car nous avons reçu votre devis mais il y a des erreurs de calcul."
         elif "implementer une requete sqlite" in last_msg:
             resp = "Je suis développeur et j'ai implémenté une requête sqlite sans index fts5."
+        elif "tu peux m envoyer le doc stp c urgent on a un souci avec le client" in last_msg:
+            resp = "Pourriez-vous s'il vous plaît me transmettre le document dès que possible ? Nous rencontrons une urgence concernant le dossier client."
+        elif "baisse de performance au niveau de la synchronisation" in last_msg:
+            resp = "Une baisse de performance affecte la synchronisation de la base de données lors de fortes charges simultanées."
+        elif "3 puces clés concises commençant par un tiret (-)" in last_msg:
+            resp = (
+                "- Les fichiers Markdown constituent la source de vérité immuable locale selon la philosophie File-over-App.\n"
+                "- La base de données SQLite avec sqlite-vec et fts5 sert exclusivement de cache d'indexation jetable.\n"
+                "- L'empreinte mémoire vive applicative est plafonnée à 200 Mo avec un contexte KV limité à 4096 tokens."
+            )
+        elif "traduis fidèlement le texte suivant en anglais" in last_msg:
+            resp = "The local inference engine executes directly in-memory without an external server to preserve the privacy of the notes."
+        elif "traduis fidèlement le texte suivant en français" in last_msg:
+            resp = "La palette d'accès rapide flottante doit s'ouvrir en moins de 50 millisecondes pour préserver une expérience utilisateur fluide."
+        elif "tu es l'assistant de capture de la palette jeanne" in last_msg:
+            resp = "- [ ] Auditer la consommation mémoire du pipeline audio d'ici la réunion de vendredi"
+        elif "pour ce signet web technique" in last_msg or "sqlite-vec: a vector search sqlite extension" in last_msg:
+            resp = "Extension SQLite écrite en C pour la recherche vectorielle rapide et locale."
         else:
             resp = "Réponse simulée de test pour l'assistant Jeanne."
 
