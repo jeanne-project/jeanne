@@ -113,12 +113,12 @@ def execute_init(args: argparse.Namespace) -> None:
             default_endpoint=args.endpoint,
         )
         if discovered:
-            print(f"   ✔️ {len(discovered)} fichier(s) de modèle trouvé(s) :")
+            print(f"   ✔️ {len(discovered)} modèle(s) éligible(s) retenu(s) pour le benchmark :")
             for m in discovered:
                 print(f"      - {m['id']} [{m.get('size', '')}]")
             models.extend(discovered)
         else:
-            print("   ℹ️  Aucun fichier (.gguf, .bin, .safetensors) trouvé dans ce dossier.")
+            print("   ℹ️  Aucun fichier de modèle éligible (.gguf, .bin, .safetensors) trouvé dans ce dossier.")
 
     # 3. Sonde Ollama si aucun dossier ou pas de modèles trouvés
     if not models and not args.no_probe:

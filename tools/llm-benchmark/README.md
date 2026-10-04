@@ -85,6 +85,8 @@ python3 tools/llm-benchmark/benchmark.py init
 python3 tools/llm-benchmark/benchmark.py init --models-dir /chemin/vers/mes/modeles/
 ```
 
+> 💡 **Filtrage Intelligent** : La commande `init` ignore automatiquement les fichiers vides ou en cours de téléchargement (0 octet, `.part`), les projecteurs multimodaux pour la vision (`mmproj`) et les modules auxiliaires de spéculation (`mtp`), garantissant que seuls les modèles de langage textuels complets et exécutables sont retenus.
+
 ### 3. Exécuter le Benchmark avec l'Environnement de votre Choix
 Vous pouvez exécuter le benchmark directement dans un environnement isolé sans même avoir à l'activer manuellement :
 

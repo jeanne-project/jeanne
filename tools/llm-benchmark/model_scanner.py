@@ -2,8 +2,9 @@
 
 import json
 import os
+import re
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 SUPPORTED_EXTENSIONS = {".gguf", ".bin", ".safetensors"}
@@ -18,14 +19,51 @@ def format_file_size(size_bytes: int) -> str:
     return f"{mb:.0f} Mo"
 
 
+def should_ignore_model_file(fname: str, size_bytes: int) -> Tuple[bool, Optional[str]]:
+    """
+    Détermine si un fichier modèle doit être ignoré lors de l'initialisation du benchmark :
+    - Fichiers vides (taille 0 ou < 1 Ko, stubs ou téléchargements en cours)
+    - Projecteurs multimodaux pour la vision (mmproj)
+    - Modules de prédiction multi-tokens auxiliaires (mtp)
+    """
+    fname_lower = fname.lower()
+
+    # 1. Fichiers vides ou en cours de téléchargement
+    if size_bytes == 0:
+        return True, "Fichier vide (0 octet, téléchargement en cours ou annulé)"
+
+    # Extensions temporaires fréquentes lors d'un téléchargement
+    incomplete_exts = (".part", ".crdownload", ".tmp", ".aria2", ".download", ".incomplete")
+    if any(fname_lower.endswith(ext) for ext in incomplete_exts) or ".part." in fname_lower:
+        return True, "Téléchargement en cours (fichier temporaire)"
+
+    # Fichiers anormalement petits pour un modèle de langage (< 1 Ko, stub Git LFS ou corrompu)
+    if size_bytes < 1024:
+        return True, "Fichier anormalement petit (< 1 Ko, stub ou pointeur LFS)"
+
+    # 2. Projecteurs multimodaux pour la vision (mmproj)
+    # Servent uniquement d'encodeurs visuels pour LLaVA / vision models, non exécutables comme LLM texte
+    if "mmproj" in fname_lower:
+        return True, "Projecteur multimodal vision (mmproj, non autonome)"
+
+    # 3. Modules Multi-Token Prediction (MTP)
+    # Modules auxiliaires de spéculation (DeepSeek-V3, etc.), non exécutables de manière autonome
+    if "mtp" in fname_lower:
+        return True, "Module Multi-Token Prediction auxiliaire (MTP, non autonome)"
+
+    return False, None
+
+
 def scan_models_directory(
     models_dir: str,
     default_endpoint: Optional[str] = None,
     default_profiles: Optional[List[str]] = None,
     use_embedded_engine: bool = True,
+    log_ignored: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Recursively scans the given directory for GGUF/model files.
+    Filters out empty files, vision mmproj files, and MTP auxiliary adapters.
     Returns a list of model configuration dictionaries.
     """
     profiles = default_profiles or ["deterministic_strict", "balanced_temp03"]
@@ -42,10 +80,17 @@ def scan_models_directory(
                 full_path = os.path.join(root, fname)
                 try:
                     size_bytes = os.path.getsize(full_path)
-                    size_str = format_file_size(size_bytes)
                 except Exception:
-                    size_str = "Taille inconnue"
+                    size_bytes = 0
 
+                # Filtrage des fichiers non éligibles au benchmark
+                ignore, reason = should_ignore_model_file(fname, size_bytes)
+                if ignore:
+                    if log_ignored:
+                        print(f"   ⏭️  Ignoré : \033[2m{fname}\033[0m ({reason})")
+                    continue
+
+                size_str = format_file_size(size_bytes)
                 model_id = os.path.splitext(fname)[0]
                 display_name = f"{model_id} ({size_str})"
                 engine_type = "embedded" if use_embedded_engine else "http"
@@ -86,6 +131,9 @@ def probe_ollama_models(
                 name = m.get("name", "")
                 if name:
                     size = m.get("size", 0)
+                    ignore, _ = should_ignore_model_file(name, size)
+                    if ignore:
+                        continue
                     size_str = format_file_size(size) if size else "Inconnue"
                     discovered.append(
                         {
