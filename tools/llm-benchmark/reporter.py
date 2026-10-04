@@ -94,8 +94,8 @@ class BenchmarkReporter:
         # 2. Tableau Récapitulatif Global
         lines.append("## 🏆 Classement & Adéquation Jeanne")
         lines.append("")
-        lines.append("| Modèle | Profil | Score Global | TTFT Moy. | Débit TPS | RAG | PII | JSON | Réunion | Concision | Verdict Matériel |")
-        lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |")
+        lines.append("| Modèle | Profil | Score Global | TTFT Moy. | Débit TPS | RAG | PII | JSON | Réunion | Concision | /corrige | Verdict Matériel |")
+        lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |")
 
         # Sort suites by overall score descending
         sorted_suites = sorted(self.suites_results, key=lambda s: s.overall_score, reverse=True)
@@ -106,12 +106,13 @@ class BenchmarkReporter:
             json_sc = f"{suite.category_scores.get('Structured Output', 0.0):.0f}%"
             meet_sc = f"{suite.category_scores.get('Meeting Assistant', 0.0):.0f}%"
             conc_sc = f"{suite.category_scores.get('Conciseness & KV Limit', 0.0):.0f}%"
+            corr_sc = f"{suite.category_scores.get('Relecture & Correction (/corrige)', 0.0):.0f}%"
             verdict = compute_verdict(suite)
 
             lines.append(
                 f"| **{suite.model_display_name}** | `{suite.profile_name}` | **{suite.overall_score:.1f} / 100** | "
                 f"{suite.avg_ttft_ms:.0f} ms | {suite.avg_tokens_per_sec:.1f} tps | "
-                f"{rag_sc} | {pii_sc} | {json_sc} | {meet_sc} | {conc_sc} | {verdict} |"
+                f"{rag_sc} | {pii_sc} | {json_sc} | {meet_sc} | {conc_sc} | {corr_sc} | {verdict} |"
             )
         lines.append("")
 

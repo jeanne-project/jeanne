@@ -23,6 +23,7 @@ Cet outil permet de mesurer rigoureusement l'adéquation, la fiabilité et les p
    - **RAG & Citations** : Synthèse sous contrainte avec obligation de citer `[source: nom_note.md]` et refus propre sans hallucination pour les questions hors-domaine.
    - **Préservation PII** : Rétention stricte des tokens masqués (`[PERSON_1]`, `[EMAIL_1]`, etc.) sans corruption.
    - **Sortie Structurée Palette** : Génération de JSON strict sans texte d'enrobage pour les commandes rapides.
+   - **Relecture & Correction (`/corrige`)** : Remédiation orthographique, grammaticale et syntaxique de phrases erronées en préservant le ton et sans aucun bavardage parasite.
    - **Synthèse de Réunion** : Extraction de résumés exécutifs et de cases à cocher `- [ ] @Nom: action`.
    - **Concision & Limite KV** : Respect de limites de mots sous contexte chargé (simulation du plafond 4096 tokens).
 5. **Métriques Physiques & Fonctionnelles** :

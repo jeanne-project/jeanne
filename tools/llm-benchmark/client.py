@@ -231,6 +231,14 @@ class LlmClient:
             )
         elif "fenêtre de contexte kv" in last_msg:
             resp = "La limite stricte est de 4096 tokens pour prévenir les débordements de mémoire vive (OOM)."
+        elif "bonjor, coment sa va" in last_msg:
+            resp = "Bonjour, comment ça va ?"
+        elif "aparament sa marche pas" in last_msg:
+            resp = "Apparemment ça ne marche pas, où est le problème ?"
+        elif "reçut votre devis mes il y a des érreur" in last_msg:
+            resp = "Je vous contacte car nous avons reçu votre devis mais il y a des erreurs de calcul."
+        elif "implementer une requete sqlite" in last_msg:
+            resp = "Je suis développeur et j'ai implémenté une requête sqlite sans index fts5."
         else:
             resp = "Réponse simulée de test pour l'assistant Jeanne."
 
