@@ -14,7 +14,7 @@ Ce document consigne la séquence de développement obligatoire de **Jeanne**. C
 | **Jalon 2** | **RAG Hybride & Temps** | Vectorisation `sqlite-vec` + Formule Time-Decay + Filtre d'obsolescence | < 200 Mo (11.0 Mo mesuré) | ✅ Validé & Clôturé (29/09/2026) |
 | **Jalon 3** | **Inférence Distante** | Client compatible OpenAI (`/v1`) en streaming SSE + Masquage PII local | < 150 Mo (13.8 Mo mesuré) | ✅ Validé & Clôturé (30/09/2026) |
 | **Jalon 4** | **Inférence Locale** | Bindings `llama.cpp` Vulkan pour modèle GGUF 3B + Déchargement RAM | < 4,5 Go | ✅ Validé & Clôturé (02/10/2026) |
-| **Jalon 5** | **Pipeline Vocal** | Interaction bidirectionnelle STT (Whisper) et TTS (Piper) débrayable | Modulaire | À venir |
+| **Jalon 5** | **Pipeline Vocal** | Interaction bidirectionnelle STT (Whisper) et TTS (Piper) débrayable | < 250 Mo (0 Mo repos / 12 Mo mesuré) | ✅ Validé & Clôturé (04/10/2026) |
 | **Jalon 6** | **Capture de Réunion** | Diarisation matérielle stéréo (Micro/WASAPI) + OCR diapositives + Seeking | < 100 Mo (capture) | À venir |
 | **Jalon 7** | **Système de Plugins** | Runner IPC JSON-RPC sur stdio + Plugin parser PDF autonome (Go) | Éphémère | À venir |
 | **Jalon 8** | **Hardening & v1** | Évaluation sur Golden Dataset + Résolution de conflits + Packaging OS | < 100 Mo | À venir |

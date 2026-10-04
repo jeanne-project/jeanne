@@ -1,7 +1,8 @@
 use jeanne_core::{
-    CancellationToken, HardwareInfo, IndexedChunk, LocalEngineConfig, LocalInferenceStats,
-    LocalLlmEngine, NoteFrontmatter, SearchResult, SnippetItem, StorageManager, TaskItem,
-    VaultStats, VaultWatcher,
+    get_audio_devices, AudioDevicesReport, CancellationToken, HardwareInfo, IndexedChunk,
+    LocalEngineConfig, LocalInferenceStats, LocalLlmEngine, NoteFrontmatter, PiperTtsEngine,
+    SearchResult, SnippetItem, StorageManager, TaskItem, VadConfig, VaultStats, VaultWatcher,
+    VoicePipeline, VoiceStatus, WhisperSttEngine,
 };
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -10,13 +11,14 @@ use tauri::Manager;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::io::AsyncWriteExt;
 
-/// État applicatif partagé contenant l'accès sécurisé au moteur SQLite, le chemin racine du coffre
-/// et le moteur d'inférence local single-tenant.
+/// État applicatif partagé contenant l'accès sécurisé au moteur SQLite, le chemin racine du coffre,
+/// le moteur d'inférence local single-tenant et le coordinateur du pipeline vocal.
 pub struct AppState {
     pub storage: Arc<Mutex<StorageManager>>,
     pub vault_path: PathBuf,
     pub watcher: Mutex<Option<VaultWatcher>>,
     pub local_engine: Arc<LocalLlmEngine>,
+    pub voice_pipeline: Arc<VoicePipeline>,
 }
 
 #[tauri::command]
@@ -634,6 +636,58 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Resul
     }
 }
 
+#[tauri::command]
+async fn toggle_voice_pipeline(
+    state: tauri::State<'_, AppState>,
+    active: bool,
+) -> Result<bool, String> {
+    if active {
+        state.voice_pipeline.start().await.map_err(|e| e.to_string())?;
+    } else {
+        state.voice_pipeline.stop().await.map_err(|e| e.to_string())?;
+    }
+    Ok(state.voice_pipeline.is_active().await)
+}
+
+#[tauri::command]
+async fn get_voice_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<VoiceStatus, String> {
+    Ok(state.voice_pipeline.get_status().await)
+}
+
+#[tauri::command]
+async fn list_audio_devices(
+    _state: tauri::State<'_, AppState>,
+) -> Result<AudioDevicesReport, String> {
+    Ok(get_audio_devices())
+}
+
+#[tauri::command]
+async fn transcribe_pcm_chunk(
+    state: tauri::State<'_, AppState>,
+    samples: Vec<f32>,
+    sample_rate: u32,
+) -> Result<String, String> {
+    state
+        .voice_pipeline
+        .transcribe_buffer(&samples, sample_rate)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn synthesize_text_to_audio(
+    state: tauri::State<'_, AppState>,
+    text: String,
+) -> Result<Vec<f32>, String> {
+    state
+        .voice_pipeline
+        .synthesize_speech(&text)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Tente d'enregistrer séquentiellement une liste ordonnée de raccourcis candidats.
 /// Retourne le premier raccourci ayant réussi son enregistrement auprès du système.
 pub fn register_first_available_shortcut<F>(
@@ -721,7 +775,12 @@ pub fn run() {
             list_available_models,
             get_models_directory,
             get_local_engine_config,
-            update_local_engine_config
+            update_local_engine_config,
+            toggle_voice_pipeline,
+            get_voice_status,
+            list_audio_devices,
+            transcribe_pcm_chunk,
+            synthesize_text_to_audio
         ])
         .setup(|app| {
             tracing::info!("Initialisation des sous-systèmes Jeanne Desktop...");
@@ -803,12 +862,18 @@ pub fn run() {
             };
 
             let local_engine = Arc::new(LocalLlmEngine::new(initial_config));
+            let voice_pipeline = Arc::new(VoicePipeline::new(
+                VadConfig::default(),
+                Arc::new(WhisperSttEngine::new(None)),
+                Arc::new(PiperTtsEngine::new(None)),
+            ));
 
             app.manage(AppState {
                 storage: storage_arc,
                 vault_path,
                 watcher: Mutex::new(Some(watcher)),
                 local_engine,
+                voice_pipeline,
             });
 
             // Enregistrement du raccourci global avec repli en cascade
@@ -1123,11 +1188,17 @@ mod tests {
         storage.init_schema().expect("init schema");
 
         let local_engine = Arc::new(LocalLlmEngine::new(LocalEngineConfig::default()));
+        let voice_pipeline = Arc::new(VoicePipeline::new(
+            VadConfig::default(),
+            Arc::new(WhisperSttEngine::new(None)),
+            Arc::new(PiperTtsEngine::new(None)),
+        ));
         let app_state = AppState {
             storage: Arc::new(Mutex::new(storage)),
             vault_path: temp_dir.path().to_path_buf(),
             watcher: Mutex::new(None),
             local_engine: local_engine.clone(),
+            voice_pipeline: voice_pipeline.clone(),
         };
 
         let hw = app_state.local_engine.hardware_info();
@@ -1148,11 +1219,17 @@ mod tests {
         storage.init_schema().expect("init schema");
 
         let local_engine = Arc::new(LocalLlmEngine::new(LocalEngineConfig::default()));
+        let voice_pipeline = Arc::new(VoicePipeline::new(
+            VadConfig::default(),
+            Arc::new(WhisperSttEngine::new(None)),
+            Arc::new(PiperTtsEngine::new(None)),
+        ));
         let app_state = AppState {
             storage: Arc::new(Mutex::new(storage)),
             vault_path: temp_dir.path().to_path_buf(),
             watcher: Mutex::new(None),
             local_engine: local_engine.clone(),
+            voice_pipeline: voice_pipeline.clone(),
         };
 
         let initial = app_state.local_engine.get_config().await;
@@ -1196,5 +1273,43 @@ mod tests {
         let parsed: LocalEngineConfig = serde_json::from_str(&disk_content).expect("parse");
         assert!(!parsed.use_gpu);
         assert_eq!(parsed.generation_timeout_secs, 20);
+    }
+
+    #[tokio::test]
+    async fn test_desktop_voice_pipeline_state_and_commands() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("test.db");
+        let storage = StorageManager::open(&db_path).expect("open storage");
+        storage.init_schema().expect("init schema");
+
+        let local_engine = Arc::new(LocalLlmEngine::new(LocalEngineConfig::default()));
+        let voice_pipeline = Arc::new(VoicePipeline::new(
+            VadConfig::default(),
+            Arc::new(WhisperSttEngine::new(None)),
+            Arc::new(PiperTtsEngine::new(None)),
+        ));
+        let app_state = AppState {
+            storage: Arc::new(Mutex::new(storage)),
+            vault_path: temp_dir.path().to_path_buf(),
+            watcher: Mutex::new(None),
+            local_engine,
+            voice_pipeline: voice_pipeline.clone(),
+        };
+
+        assert!(!app_state.voice_pipeline.is_active().await);
+        let status = app_state.voice_pipeline.get_status().await;
+        assert_eq!(status.memory_allocated_mb, 0);
+
+        assert!(app_state.voice_pipeline.start().await.is_ok());
+        assert!(app_state.voice_pipeline.is_active().await);
+
+        let active_status = app_state.voice_pipeline.get_status().await;
+        assert!(active_status.is_active);
+        assert!(active_status.memory_allocated_mb <= 250);
+
+        assert!(app_state.voice_pipeline.stop().await.is_ok());
+        assert!(!app_state.voice_pipeline.is_active().await);
+        let stopped_status = app_state.voice_pipeline.get_status().await;
+        assert_eq!(stopped_status.memory_allocated_mb, 0);
     }
 }

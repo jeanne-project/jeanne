@@ -1,5 +1,13 @@
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
+export PATH := "/home/runner/.cargo/bin:" + env_var_or_default("PATH", "")
+export PKG_CONFIG_PATH := "/home/runner/.local/usr/lib/x86_64-linux-gnu/pkgconfig:" + env_var_or_default("PKG_CONFIG_PATH", "")
+export C_INCLUDE_PATH := "/home/runner/.local/usr/include:" + env_var_or_default("C_INCLUDE_PATH", "")
+export CPLUS_INCLUDE_PATH := "/home/runner/.local/usr/include:" + env_var_or_default("CPLUS_INCLUDE_PATH", "")
+export RUSTFLAGS := "-L native=/home/runner/.local/usr/lib/x86_64-linux-gnu " + env_var_or_default("RUSTFLAGS", "")
+export LD_LIBRARY_PATH := "/home/runner/.local/usr/lib/x86_64-linux-gnu:" + env_var_or_default("LD_LIBRARY_PATH", "")
+
+
 # Affiche les commandes disponibles
 default:
     @just --list

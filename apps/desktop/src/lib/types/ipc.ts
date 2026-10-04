@@ -105,4 +105,37 @@ export interface IpcCommands {
   evaluate_math(expression: string): Promise<number>;
   ai_process_clipboard(action: string, text: string, param?: string): Promise<string>;
   ask_vault(question: string): Promise<string>;
+  toggle_voice_pipeline(active: boolean): Promise<boolean>;
+  get_voice_status(): Promise<VoiceStatus>;
+  list_audio_devices(): Promise<AudioDevicesReport>;
+  transcribe_pcm_chunk(samples: number[], sample_rate: number): Promise<string>;
+  synthesize_text_to_audio(text: string): Promise<number[]>;
 }
+
+export type VoiceState = 'Idle' | 'Listening' | 'Transcribing' | 'Thinking' | 'Speaking' | 'Error';
+
+export interface AudioDevice {
+  id: string;
+  name: string;
+  default_sample_rate: number;
+  is_default: boolean;
+  is_input: boolean;
+}
+
+export interface AudioDevicesReport {
+  input_devices: AudioDevice[];
+  output_devices: AudioDevice[];
+  default_input_name: string | null;
+  default_output_name: string | null;
+}
+
+export interface VoiceStatus {
+  is_active: boolean;
+  state: VoiceState;
+  input_sample_rate: number;
+  memory_allocated_mb: number;
+  last_transcription_latency_ms: number;
+  last_synthesis_ttfb_ms: number;
+  active_device_name: string | null;
+}
+

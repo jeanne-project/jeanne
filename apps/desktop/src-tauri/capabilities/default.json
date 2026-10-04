@@ -32,7 +32,12 @@
     "allow-list-available-models",
     "allow-get-models-directory",
     "allow-get-local-engine-config",
-    "allow-update-local-engine-config"
+    "allow-update-local-engine-config",
+    "allow-toggle-voice-pipeline",
+    "allow-get-voice-status",
+    "allow-list-audio-devices",
+    "allow-transcribe-pcm-chunk",
+    "allow-synthesize-text-to-audio"
   ]
 }
 
