@@ -27,7 +27,7 @@ check-permissions:
 # Vérifie qu'aucun fichier non suivi (untracked) ou modifié n'a été oublié
 [unix]
 check-git-clean:
-    @if [ -n "$$(git status --porcelain)" ]; then echo "❌ Erreur : Fichiers non commités ou non suivis détectés dans l'arbre de travail :"; git status -s; exit 1; fi
+    @if [ -n "$(git status --porcelain)" ]; then echo "❌ Erreur : Fichiers non commités ou non suivis détectés dans l'arbre de travail :"; git status -s; exit 1; fi
     @echo "✅ Arbre Git propre (zéro fichier non suivi ou non commité)."
 
 [windows]
