@@ -6,6 +6,7 @@ export C_INCLUDE_PATH := "/home/runner/.local/usr/include:" + env_var_or_default
 export CPLUS_INCLUDE_PATH := "/home/runner/.local/usr/include:" + env_var_or_default("CPLUS_INCLUDE_PATH", "")
 export RUSTFLAGS := "-L native=/home/runner/.local/usr/lib/x86_64-linux-gnu " + env_var_or_default("RUSTFLAGS", "")
 export LD_LIBRARY_PATH := "/home/runner/.local/usr/lib/x86_64-linux-gnu:" + env_var_or_default("LD_LIBRARY_PATH", "")
+export LIBRARY_PATH := "/home/runner/.local/usr/lib/x86_64-linux-gnu:" + env_var_or_default("LIBRARY_PATH", "")
 
 
 # Affiche les commandes disponibles
@@ -31,7 +32,7 @@ check-git-clean:
 
 [windows]
 check-git-clean:
-    @if ($$(git status --porcelain)) { Write-Error "❌ Erreur : Fichiers non commités ou non suivis détectés dans l'arbre de travail."; git status -s; exit 1 }
+    @$$status = git status --porcelain; if ($$status) { Write-Error "❌ Erreur : Fichiers non commités ou non suivis détectés dans l'arbre de travail :"; git status -s; exit 1 }
     @echo "✅ Arbre Git propre (zéro fichier non suivi ou non commité)."
 
 # Contrôles locaux déterministes obligatoires avant appel au Reviewer
