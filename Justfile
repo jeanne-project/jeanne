@@ -19,13 +19,29 @@ start-milestone id name:
     git checkout -b feat/m{{id}}-{{name}}
     @echo "Branche feat/m{{id}}-{{name}} créée."
 
+# Contrôle la synchronisation des commandes IPC, capabilities et fichiers TOML de permissions
+check-permissions:
+    @node scripts/check_tauri_permissions.mjs
+
+# Vérifie qu'aucun fichier non suivi (untracked) ou modifié n'a été oublié
+[unix]
+check-git-clean:
+    @if [ -n "$$(git status --porcelain)" ]; then echo "❌ Erreur : Fichiers non commités ou non suivis détectés dans l'arbre de travail :"; git status -s; exit 1; fi
+    @echo "✅ Arbre Git propre (zéro fichier non suivi ou non commité)."
+
+[windows]
+check-git-clean:
+    @if ($$(git status --porcelain)) { Write-Error "❌ Erreur : Fichiers non commités ou non suivis détectés dans l'arbre de travail."; git status -s; exit 1 }
+    @echo "✅ Arbre Git propre (zéro fichier non suivi ou non commité)."
+
 # Contrôles locaux déterministes obligatoires avant appel au Reviewer
 pre-review:
     @echo "=== [Pre-Review] Exécution des contrôles qualité ==="
+    just check-permissions
     cargo clippy -p jeanne-core --all-targets -- -D warnings
     cargo test -p jeanne-core
     cd apps/desktop && npm run build
-    @echo "✅ Contrôles statiques et tests validés."
+    @echo "✅ Contrôles statiques, tests et permissions validés."
 
 # Initialise le fichier de revue pour le Reviewer
 [windows]
@@ -56,6 +72,9 @@ init-qa milestone:
 # Fusionne la branche de jalon sur main après approbation stricte
 [windows]
 merge-milestone id name:
+    @echo "Vérification des permissions et de l'arbre Git..."
+    just check-permissions
+    just check-git-clean
     @echo "Vérification de l'approbation de la revue..."
     @Select-String -Path docs/reviews/M{{id}}_CODE_REVIEW.md -Pattern "STATUS: APPROUVÉ" -Quiet | ForEach-Object { if (-not $_) { echo "❌ Erreur : La revue n'est pas marquée 'STATUS: APPROUVÉ'"; exit 1 } }
     git checkout main
@@ -64,6 +83,9 @@ merge-milestone id name:
 
 [unix]
 merge-milestone id name:
+    @echo "Vérification des permissions et de l'arbre Git..."
+    just check-permissions
+    just check-git-clean
     @echo "Vérification de l'approbation de la revue..."
     @if ! grep -q "STATUS: APPROUVÉ" docs/reviews/M{{id}}_CODE_REVIEW.md; then echo "❌ Erreur : La revue n'est pas marquée 'STATUS: APPROUVÉ'"; exit 1; fi
     git checkout main
