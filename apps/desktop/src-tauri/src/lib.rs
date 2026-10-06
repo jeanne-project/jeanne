@@ -853,6 +853,7 @@ pub fn run() {
             toggle_voice_pipeline,
             get_voice_status,
             list_audio_devices,
+            transcribe_pcm_chunk,
             synthesize_text_to_audio,
             start_meeting_recording,
             stop_meeting_recording,

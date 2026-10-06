@@ -112,6 +112,23 @@ for (const cmd of registeredCommands) {
   }
 }
 
+// Vérification C : Chaque fonction annotée #[tauri::command] dans lib.rs doit être enregistrée dans generate_handler!
+const definedCommands = [];
+const commandRegex = /#\[tauri::command\]\s*(?:async\s+)?fn\s+([a-zA-Z0-9_]+)/g;
+let cmdMatch;
+while ((cmdMatch = commandRegex.exec(libRsContent)) !== null) {
+  definedCommands.push(cmdMatch[1]);
+}
+
+for (const cmd of definedCommands) {
+  if (!registeredCommands.includes(cmd)) {
+    console.error(
+      `❌ ERREUR COMMANDE MANQUANTE : La fonction '${cmd}' est annotée #[tauri::command] mais n'est pas enregistrée dans invoke_handler(tauri::generate_handler![...])`
+    );
+    hasErrors = true;
+  }
+}
+
 if (hasErrors) {
   console.error("\n💥 Le contrôle des permissions Tauri a échoué. Corrigez les écarts ci-dessus avant de commiter.");
   process.exit(1);
