@@ -710,6 +710,11 @@ async fn synthesize_text_to_audio(
     state: tauri::State<'_, AppState>,
     text: String,
 ) -> Result<Vec<f32>, String> {
+    state
+        .voice_pipeline
+        .synthesize_speech(&text)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
