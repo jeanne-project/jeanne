@@ -1039,11 +1039,17 @@ mod tests {
         storage.init_schema().expect("init schema");
 
         let local_engine = Arc::new(LocalLlmEngine::new(LocalEngineConfig::default()));
+        let voice_pipeline = Arc::new(VoicePipeline::new(
+            VadConfig::default(),
+            Arc::new(WhisperSttEngine::new(None)),
+            Arc::new(PiperTtsEngine::new(None)),
+        ));
         let app_state = AppState {
             storage: Arc::new(Mutex::new(storage)),
             vault_path: temp_dir.path().to_path_buf(),
             watcher: Mutex::new(None),
             local_engine: local_engine.clone(),
+            voice_pipeline,
         };
 
         // Test insertion manuelle et recherche
