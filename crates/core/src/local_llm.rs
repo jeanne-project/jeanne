@@ -259,7 +259,12 @@ impl LocalLlmEngine {
         }
         .unwrap_or_else(|| {
             let dir = resolve_default_model_dir();
-            dir.join("qwen2.5-3b-instruct-q4_k_m.gguf")
+            let default_path = dir.join("qwen2.5-3b-instruct-q4_k_m.gguf");
+            tracing::warn!(
+                "[LocalLLM] [REPLI] Modèle non trouvé via la découverte, repli sur le chemin par défaut : {}",
+                default_path.display()
+            );
+            default_path
         });
 
         tracing::info!(
@@ -436,19 +441,22 @@ impl LocalLlmEngine {
 
             // 2. Repli sur le moteur linguistique et sémantique embarqué (modèle GGUF chargé en RAM)
             if !streamed_via_daemon {
+                tracing::warn!(
+                    "[LocalLLM] [REPLI] Inférence exécutée via le moteur heuristique de repli embarqué (synthèse interne)."
+                );
                 let tokens_to_stream = synthesize_local_response(&prompt);
 
                 for token in tokens_to_stream {
                     if cancellation.is_cancelled() {
                         tracing::debug!(
-                            "[LocalLLM] Flux de génération interrompu par annulation utilisateur."
+                            "[LocalLLM] [REPLI] Flux de génération interrompu par annulation utilisateur."
                         );
                         break;
                     }
 
                     if start.elapsed() >= timeout_duration {
                         tracing::warn!(
-                            "[LocalLLM] Timeout de génération ({}s) atteint. Interruption préventive pour protéger le système.",
+                            "[LocalLLM] [REPLI] Timeout de génération ({}s) atteint. Interruption préventive pour protéger le système.",
                             timeout_secs
                         );
                         let _ = tx
@@ -462,7 +470,7 @@ impl LocalLlmEngine {
 
                     if tx.send(token.to_string()).await.is_err() {
                         tracing::debug!(
-                            "[LocalLLM] Récepteur de flux déconnecté, arrêt de l'émission."
+                            "[LocalLLM] [REPLI] Récepteur de flux déconnecté, arrêt de l'émission."
                         );
                         break;
                     }
@@ -477,12 +485,21 @@ impl LocalLlmEngine {
             let elapsed_secs = elapsed.as_secs_f64().max(0.001);
             let tps = (generated_count as f64) / elapsed_secs;
 
-            tracing::info!(
-                "[LocalLLM] Fin de génération : {} tokens générés en {} ms ({:.1} tps)",
-                generated_count,
-                elapsed.as_millis(),
-                tps
-            );
+            if streamed_via_daemon {
+                tracing::info!(
+                    "[LocalLLM] Fin de génération (mode: serveur neuronal actif) : {} tokens générés en {} ms ({:.1} tps)",
+                    generated_count,
+                    elapsed.as_millis(),
+                    tps
+                );
+            } else {
+                tracing::warn!(
+                    "[LocalLLM] [REPLI] Fin de génération (mode: REPLI HEURISTIQUE) : {} tokens générés en {} ms ({:.1} tps)",
+                    generated_count,
+                    elapsed.as_millis(),
+                    tps
+                );
+            }
 
             let mut stats = stats_arc.lock().await;
             stats.prompt_tokens = prompt_token_count;
@@ -527,6 +544,9 @@ impl LlmProvider for LocalLlmEngine {
     async fn fetch_models(&self) -> Result<Vec<String>, LlmError> {
         let models = crate::model_discovery::discover_models(None);
         if models.is_empty() {
+            tracing::info!(
+                "[LocalLLM] [REPLI] Aucun modèle GGUF physique découvert sur disque, repli sur le modèle recommandé par défaut ('Qwen2.5-3B-Instruct-Q4_K_M.gguf')."
+            );
             Ok(vec!["Qwen2.5-3B-Instruct-Q4_K_M.gguf".to_string()])
         } else {
             Ok(models.into_iter().map(|m| m.name).collect())
@@ -1035,8 +1055,17 @@ async fn try_stream_from_local_daemon(
     endpoints.push("http://127.0.0.1:8080/v1".to_string()); // llama-server
     endpoints.push("http://127.0.0.1:1234/v1".to_string()); // LM Studio
 
+    let probe_client = match reqwest::Client::builder()
+        .connect_timeout(Duration::from_millis(150))
+        .timeout(Duration::from_millis(300))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return None,
+    };
+
     let client = match reqwest::Client::builder()
-        .connect_timeout(Duration::from_millis(200))
+        .connect_timeout(Duration::from_millis(250))
         .timeout(timeout_duration)
         .build()
     {
@@ -1050,16 +1079,34 @@ async fn try_stream_from_local_daemon(
         0
     };
 
-    for base_url in endpoints {
+    for base_url in &endpoints {
         if cancellation.is_cancelled() || start.elapsed() >= timeout_duration {
             return None;
+        }
+
+        // Sonde rapide (<300 ms) pour vérifier si le serveur local écoute
+        let models_url = format!("{base_url}/models");
+        let is_alive = match probe_client.get(&models_url).send().await {
+            Ok(_) => true,
+            Err(err) => {
+                tracing::debug!(
+                    "[LocalLLM] Sonde endpoint daemon {} inaccessible ou inactif : {:?}",
+                    base_url,
+                    err
+                );
+                false
+            }
+        };
+
+        if !is_alive {
+            continue;
         }
 
         let preferred_model = config
             .model_path
             .as_deref()
             .and_then(|p| Path::new(p).file_stem().and_then(|s| s.to_str()));
-        let model_name = detect_daemon_model_name(&client, &base_url, preferred_model).await;
+        let model_name = detect_daemon_model_name(&client, base_url, preferred_model).await;
 
         let url = format!("{base_url}/chat/completions");
         let mut payload = serde_json::json!({
@@ -1148,6 +1195,11 @@ async fn try_stream_from_local_daemon(
             }
         }
     }
+
+    tracing::warn!(
+        "[LocalLLM] [REPLI] Aucun serveur d'inférence neuronal actif détecté parmi {:?}. Bascule automatique sur le moteur de repli heuristique embarqué.",
+        endpoints
+    );
     None
 }
 

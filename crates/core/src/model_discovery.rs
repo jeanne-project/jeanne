@@ -355,6 +355,10 @@ pub fn resolve_model_path_in_dirs(requested: Option<&str>, dirs: &[PathBuf]) -> 
         }
 
         if let Some(any_gguf) = first_gguf {
+            tracing::warn!(
+                "[ModelDiscovery] [REPLI] Aucun modèle Qwen 3B recommandé trouvé dans les dossiers candidats. Repli sur le premier modèle GGUF disponible : {}",
+                any_gguf.display()
+            );
             return Some(any_gguf);
         }
     }

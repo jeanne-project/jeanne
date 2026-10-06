@@ -97,6 +97,9 @@ fn detect_system_ram() -> (u64, u64) {
     }
 
     // Repli sécurisé pour autres OS ou conteneurs
+    tracing::warn!(
+        "[Hardware] [REPLI] Détection RAM système (/proc/meminfo) indisponible ou OS non-Linux. Repli sur le profil standard (16384 Mo total, 8192 Mo disponible)."
+    );
     (16384, 8192)
 }
 
@@ -141,6 +144,9 @@ fn detect_vulkan() -> (bool, Option<String>) {
         }
     }
 
+    tracing::warn!(
+        "[Hardware] [REPLI] Aucun runtime Vulkan détecté sur le système hôte. Repli sur exécution CPU uniquement."
+    );
     (false, None)
 }
 

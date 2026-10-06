@@ -568,8 +568,24 @@ impl StorageManager {
 
         let results = match execute_search(&query_str) {
             Ok(res) if !res.is_empty() => res,
-            Ok(_) | Err(_) => {
-                // Repli sécurisé en cas d'erreur de syntaxe FTS5 ou 0 résultat
+            Ok(_) => {
+                tracing::debug!(
+                    "[Storage] [REPLI] Requête FTS5 standard '{}' sans résultat. Repli sur la syntaxe préfixe.",
+                    query_str
+                );
+                let fallback = query_str
+                    .split_whitespace()
+                    .map(|w| format!("\"{}\"*", w.replace('"', "")))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                execute_search(&fallback).unwrap_or_default()
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "[Storage] [REPLI] Erreur syntaxe FTS5 pour '{}' ({:?}). Repli automatique sur la syntaxe préfixe.",
+                    query_str,
+                    err
+                );
                 let fallback = query_str
                     .split_whitespace()
                     .map(|w| format!("\"{}\"*", w.replace('"', "")))
@@ -582,6 +598,10 @@ impl StorageManager {
         if results.is_empty() {
             let keywords = extract_search_keywords(trimmed);
             if !keywords.is_empty() {
+                tracing::debug!(
+                    "[Storage] [REPLI] Recherche FTS5 initiale et préfixe sans résultat. Repli en cascade sur l'extraction de mots-clés : {:?}",
+                    keywords
+                );
                 // Essai 1 : tous les mots-clés en AND
                 let and_query = keywords
                     .iter()

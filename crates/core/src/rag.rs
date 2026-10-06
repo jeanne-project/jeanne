@@ -156,8 +156,12 @@ impl RagEngine {
                     Ok(list) => {
                         raw_scores = list;
                     }
-                    Err(_) => {
+                    Err(err) => {
                         // Repli sécurisé en découpant les mots en tokens FTS5 valides
+                        tracing::warn!(
+                            "[RAG] [REPLI] Échec de la requête FTS5 exacte ({:?}). Repli automatique sur le découpage en tokens préfixes.",
+                            err
+                        );
                         let fallback = sanitized
                             .split_whitespace()
                             .map(|w| format!("\"{}\"*", w.replace('"', "")))

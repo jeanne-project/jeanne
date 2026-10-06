@@ -216,8 +216,11 @@ func handleRequest(req *JSONRPCRequest) {
 		// 1. Tenter un serveur daemon local (Ollama ou llama-server)
 		tokensStreamed, ok := tryStreamDaemon(req.ID, p.Prompt, p.MaxTokens)
 		if !ok {
+			log.Printf("[jeanne-llm-runner] [REPLI] Aucun serveur neuronal actif (:11434, :8080). Bascule sur streamFallback (synthèse heuristique).")
 			// 2. Repli contextuel embarqué
 			tokensStreamed = streamFallback(req.ID, p.Prompt)
+		} else {
+			log.Printf("[jeanne-llm-runner] Inférence diffusée avec succès via serveur neuronal actif (%d tokens).", tokensStreamed)
 		}
 
 		elapsedSecs := time.Since(start).Seconds()
@@ -375,6 +378,7 @@ func tryStreamDaemon(requestID interface{}, prompt string, maxTokens int) (int, 
 
 func streamFallback(requestID interface{}, prompt string) int {
 	tokens := synthesizeTokens(prompt)
+	log.Printf("[jeanne-llm-runner] [REPLI] Émission de %d tokens simulés par repli contextuel.", len(tokens))
 	for _, tok := range tokens {
 		sendChunk(requestID, tok)
 		time.Sleep(15 * time.Millisecond) // Rythme d'inférence fluide

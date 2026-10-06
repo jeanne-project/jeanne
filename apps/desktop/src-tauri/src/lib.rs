@@ -977,7 +977,15 @@ pub fn run() {
 
             match registered {
                 Some(shortcut) => {
-                    tracing::info!("Raccourci global enregistré avec succès : {}", shortcut);
+                    if shortcut != candidates[0] {
+                        tracing::warn!(
+                            "[Shortcut] [REPLI] Le raccourci principal '{}' n'a pas pu être enregistré (conflit OS). Repli sur le raccourci secondaire : {}",
+                            candidates[0],
+                            shortcut
+                        );
+                    } else {
+                        tracing::info!("Raccourci global enregistré avec succès : {}", shortcut);
+                    }
                 }
                 None => {
                     tracing::error!(

@@ -76,6 +76,9 @@ pub fn get_audio_devices() -> AudioDevicesReport {
 
     // Repli gracieux si aucun périphérique n'est présent dans l'environnement d'exécution
     if input_devices.is_empty() {
+        tracing::warn!(
+            "[Voice] [REPLI] Aucun périphérique d'entrée audio physique détecté. Repli automatique sur 'Microphone Système Virtuel'."
+        );
         input_devices.push(AudioDevice {
             id: "virtual-in-0".to_string(),
             name: "Microphone Système Virtuel".to_string(),
@@ -86,6 +89,9 @@ pub fn get_audio_devices() -> AudioDevicesReport {
     }
 
     if output_devices.is_empty() {
+        tracing::warn!(
+            "[Voice] [REPLI] Aucun périphérique de sortie audio physique détecté. Repli automatique sur 'Haut-parleur Système Virtuel'."
+        );
         output_devices.push(AudioDevice {
             id: "virtual-out-0".to_string(),
             name: "Haut-parleur Système Virtuel".to_string(),

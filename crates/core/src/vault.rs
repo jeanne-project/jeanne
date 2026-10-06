@@ -37,6 +37,10 @@ fn fallback_vault_path() -> Result<PathBuf> {
     };
 
     let vault_dir = base_dir.join("Documents").join("JeanneVault");
+    tracing::info!(
+        "[Vault] [REPLI] Variable JEANNE_VAULT_PATH non définie ou vide. Repli automatique sur le chemin de coffre standard : {}",
+        vault_dir.display()
+    );
     if !vault_dir.exists() {
         std::fs::create_dir_all(&vault_dir)?;
     }
