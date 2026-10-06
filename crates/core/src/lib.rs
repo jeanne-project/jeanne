@@ -2,6 +2,7 @@ pub mod error;
 pub mod hardware;
 pub mod llm;
 pub mod local_llm;
+pub mod meeting;
 pub mod model_discovery;
 pub mod models;
 pub mod parser;
@@ -12,6 +13,12 @@ pub mod rag;
 pub mod storage;
 pub mod vault;
 pub mod voice;
+
+pub use meeting::{
+    AudioAligner, DiarizationMetrics, Diarizer, DualTrackSpooler, MeetingConfig, MeetingError,
+    MeetingNoteGenerator, MeetingRecorder, MeetingSession, MeetingStatus, MeetingSummaryResult,
+    PerceptualHasher, SlideDetector, SlideKeyframe, SpeakerTag, TranscriptSegment,
+};
 
 pub use plugins::{
     JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, PluginCapability,
