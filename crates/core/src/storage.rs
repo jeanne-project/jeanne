@@ -566,22 +566,66 @@ impl StorageManager {
             Ok(results)
         };
 
-        match execute_search(&query_str) {
-            Ok(results) => Ok(results),
-            Err(_) => {
-                // Repli sécurisé en cas d'erreur de syntaxe FTS5 (ex. guillemets ou opérateurs)
+        let results = match execute_search(&query_str) {
+            Ok(res) if !res.is_empty() => res,
+            Ok(_) | Err(_) => {
+                // Repli sécurisé en cas d'erreur de syntaxe FTS5 ou 0 résultat
                 let fallback = query_str
                     .split_whitespace()
                     .map(|w| format!("\"{}\"*", w.replace('"', "")))
                     .collect::<Vec<_>>()
                     .join(" ");
-                if let Ok(results) = execute_search(&fallback) {
-                    Ok(results)
-                } else {
-                    Ok(Vec::new())
+                execute_search(&fallback).unwrap_or_default()
+            }
+        };
+
+        if results.is_empty() {
+            let keywords = extract_search_keywords(trimmed);
+            if !keywords.is_empty() {
+                // Essai 1 : tous les mots-clés en AND
+                let and_query = keywords
+                    .iter()
+                    .map(|k| format!("\"{}\"", k.replace('"', "")))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if let Ok(res) = execute_search(&and_query) {
+                    if !res.is_empty() {
+                        return Ok(res);
+                    }
+                }
+
+                // Essai 2 : mots-clés en OR (classement BM25)
+                let or_query = keywords
+                    .iter()
+                    .map(|k| format!("\"{}\"", k.replace('"', "")))
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
+                if let Ok(res) = execute_search(&or_query) {
+                    if !res.is_empty() {
+                        return Ok(res);
+                    }
+                }
+
+                // Essai 3 : préfixe en OR (tolérance flexions/accords)
+                let prefix_or = keywords
+                    .iter()
+                    .map(|k| format!("\"{}\"*", k.replace('"', "")))
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
+                if let Ok(res) = execute_search(&prefix_or) {
+                    if !res.is_empty() {
+                        return Ok(res);
+                    }
                 }
             }
         }
+
+        Ok(results)
+    }
+
+    /// Recherche tolérante adaptée aux questions en langage naturel pour le RAG.
+    pub fn search_question(&self, question: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        self.search_fts(question, limit)
     }
 
     /// Calcule les statistiques d'indexation du coffre.
@@ -609,6 +653,50 @@ impl StorageManager {
     pub fn raw_connection(&self) -> &Connection {
         &self.conn
     }
+}
+
+/// Extrait les mots-clés significatifs d'un texte ou d'une question en filtrant la ponctuation et les mots vides.
+pub fn extract_search_keywords(text: &str) -> Vec<String> {
+    let clean = text
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>();
+
+    let stop_words: std::collections::HashSet<&'static str> = [
+        // Français
+        "de", "des", "du", "le", "la", "les", "un", "une", "est", "sont", "été", "ete", "être", "etre",
+        "a", "ont", "avoir", "ce", "cet", "cette", "ces", "mon", "ma", "mes", "ton", "ta", "tes",
+        "son", "sa", "ses", "notre", "nos", "votre", "vos", "leur", "leurs", "qui", "que", "quoi",
+        "dont", "ou", "où", "quand", "comment", "pourquoi", "quel", "quelle", "quels", "quelles",
+        "combien", "dans", "sur", "sous", "pour", "par", "avec", "sans", "en", "au", "aux", "y",
+        "il", "elle", "on", "ils", "elles", "je", "tu", "nous", "vous", "me", "te", "se", "moi",
+        "toi", "lui", "eux", "ceci", "cela", "ca", "ça", "quelque", "quelques", "plus", "moins",
+        "tres", "très", "bien", "faire", "fait",
+        // Anglais
+        "what", "which", "who", "whom", "where", "when", "why", "how", "is", "are", "was", "were",
+        "be", "been", "the", "in", "on", "at", "to", "for", "of", "with", "my", "your", "his",
+        "her", "their", "our",
+    ]
+    .into_iter()
+    .collect();
+
+    let mut keywords = Vec::new();
+    for word in clean.split_whitespace() {
+        let lower = word.to_lowercase();
+        if lower.len() >= 2 && !stop_words.contains(lower.as_str()) {
+            keywords.push(word.to_string());
+        }
+    }
+
+    if keywords.is_empty() {
+        for word in clean.split_whitespace() {
+            if word.len() >= 2 {
+                keywords.push(word.to_string());
+            }
+        }
+    }
+
+    keywords
 }
 
 fn sanitize_fts5_query(query: &str) -> String {

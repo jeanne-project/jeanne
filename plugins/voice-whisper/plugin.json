@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "id": "org.jeanneproject.voice.whisper",
+  "name": "Speech-to-Text Whisper Engine",
+  "version": "1.0.0",
+  "description": "Moteur de transcription vocale hors-ligne haute fidélité basé sur Whisper (modèles tiny/base). Reçoit l'audio 16 kHz et extrait le texte avec ponctuation.",
+  "author": "Jeanne Project",
+  "entrypoint": {
+    "windows": "bin/jeanne-whisper.exe",
+    "linux": "bin/jeanne-whisper"
+  },
+  "lifecycle": "daemon_managed",
+  "idle_timeout_seconds": 120,
+  "timeout_seconds": 45,
+  "capabilities": [
+    {
+      "type": "voice_stt",
+      "default_model": "whisper-tiny",
+      "supported_models": ["whisper-tiny", "whisper-base"],
+      "input_format": "pcm_16k_mono_f32",
+      "supported_languages": ["fr", "en", "auto"]
+    }
+  ]
+}

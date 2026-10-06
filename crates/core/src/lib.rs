@@ -50,7 +50,7 @@ pub use models::{
 pub use parser::parse_markdown;
 pub use pii::{PiiSession, PiiSlidingBuffer};
 pub use rag::{RagEngine, check_circuit_breaker};
-pub use storage::StorageManager;
+pub use storage::{StorageManager, extract_search_keywords};
 pub use tokio_util::sync::CancellationToken;
 pub use vault::{VaultWatcher, resolve_vault_path};
 

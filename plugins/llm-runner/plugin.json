@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "id": "org.jeanneproject.llm.runner",
+  "name": "Local LLM Inference Runner (Vulkan / GGUF)",
+  "version": "1.0.0",
+  "description": "Moteur d'inférence locale pour modèles GGUF quantifiés avec accélération Vulkan/GPU ou CPU, streaming continu et déchargement mémoire immédiat.",
+  "author": "Jeanne Project",
+  "entrypoint": {
+    "windows": "bin/jeanne-llm-runner.exe",
+    "linux": "bin/jeanne-llm-runner"
+  },
+  "lifecycle": "daemon_managed",
+  "idle_timeout_seconds": 300,
+  "timeout_seconds": 120,
+  "capabilities": [
+    {
+      "type": "llm_runner",
+      "default_model": "qwen2.5-3b-instruct-q4_k_m.gguf",
+      "supported_formats": [".gguf"],
+      "supported_architectures": ["qwen2", "llama", "mistral", "phi3", "gemma2"],
+      "max_context_size": 4096,
+      "supports_streaming": true,
+      "supports_vulkan": true
+    }
+  ]
+}

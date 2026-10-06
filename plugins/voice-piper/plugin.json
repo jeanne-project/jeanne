@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "id": "org.jeanneproject.voice.piper",
+  "name": "Text-to-Speech Piper Engine",
+  "version": "1.0.0",
+  "description": "Moteur de synthèse vocale locale ultra-rapide basé sur Piper TTS. Synthétise la voix naturelle phrase par phrase avec latence premier octet (TTFB) < 300 ms.",
+  "author": "Jeanne Project",
+  "entrypoint": {
+    "windows": "bin/jeanne-piper.exe",
+    "linux": "bin/jeanne-piper"
+  },
+  "lifecycle": "daemon_managed",
+  "idle_timeout_seconds": 120,
+  "timeout_seconds": 30,
+  "capabilities": [
+    {
+      "type": "voice_tts",
+      "default_voice": "fr_FR-siwis-medium",
+      "output_format": "pcm_16k_mono_f32",
+      "supported_languages": ["fr", "en"],
+      "streaming_sentence_level": true
+    }
+  ]
+}

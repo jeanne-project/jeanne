@@ -685,3 +685,94 @@ fn test_04_21_gguf_recommended_parameters_extraction() {
     assert!(rec.temperature.is_some());
     assert!(rec.context_size.is_some());
 }
+
+#[test]
+fn test_palette_corrige_user_cases() {
+    // 1. "J'vais bien, meci bcp"
+    let corrected_1 = correct_french_and_english("J'vais bien, meci bcp");
+    assert_eq!(
+        corrected_1, "Je vais bien, merci beaucoup.",
+        "Doit corriger 'J'vais' en 'Je vais', 'meci' en 'merci', et 'bcp' en 'beaucoup'"
+    );
+
+    // 2. "salut, commen sa va ?"
+    let corrected_2 = correct_french_and_english("salut, commen sa va ?");
+    assert_eq!(
+        corrected_2, "Salut, comment ça va ?",
+        "Doit corriger 'commen' en 'comment' et 'sa va' en 'ça va' avec majuscule et ponctuation"
+    );
+}
+
+#[test]
+fn test_palette_trad_user_cases() {
+    // 1. "Bonjour, comment vas-tu ce matin ?"
+    let trad_1 = translate_text("Bonjour, comment vas-tu ce matin ?", "anglais");
+    assert_eq!(
+        trad_1, "Good morning, how are you this morning?",
+        "Doit traduire fidèlement la salutation et la question du matin"
+    );
+
+    // 2. "Je m'en vais."
+    let trad_2 = translate_text("Je m'en vais.", "anglais");
+    assert_eq!(
+        trad_2, "I am leaving.",
+        "Doit traduire 'Je m'en vais.' en anglais sans fallback [EN]"
+    );
+}
+
+#[test]
+fn test_palette_ask_rag_user_case() {
+    let prompt = "Tu es Jeanne, assistant de connaissances. Réponds à la question suivante en te basant STRICTEMENT sur les extraits du coffre fournis ci-dessous. Si l'information n'est pas présente, indique-le honnêtement. Cite la note source entre crochets [source: titre].\n\nExtraits du coffre :\n--- Note : Ma voiture est bleu ---\nMa voiture est bleu\n\nQuestion : de quelle couleur est ma voiture ?\n\nRéponse :";
+    let tokens = synthesize_local_response(prompt);
+    let full_answer = tokens.join("");
+    assert!(
+        full_answer.contains("bleu"),
+        "La réponse doit contenir la couleur de la voiture (bleu), got: '{}'",
+        full_answer
+    );
+    assert!(
+        full_answer.contains("[source: Ma voiture est bleu]"),
+        "La réponse doit citer la note source entre crochets, got: '{}'",
+        full_answer
+    );
+}
+
+#[test]
+fn test_storage_search_question_natural_language() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let db_path = temp_dir.path().join("test.db");
+    let storage = jeanne_core::StorageManager::open(&db_path).expect("open storage");
+    storage.init_schema().expect("init schema");
+
+    storage
+        .upsert_file("Notes/Voiture.md", "hash123", 1000, None)
+        .expect("upsert file");
+
+    let chunk = jeanne_core::IndexedChunk {
+        id: None,
+        chunk_id: "Notes/Voiture.md:0".to_string(),
+        file_path: "Notes/Voiture.md".to_string(),
+        chunk_index: 0,
+        content: "Ma voiture est bleu".to_string(),
+        token_count: 4,
+        coala_type: jeanne_core::CoalaType::Semantic,
+        status: jeanne_core::NoteStatus::Active,
+        superseded_by: None,
+        deprecated_at: None,
+        date_creation: 1000,
+    };
+    storage.index_chunk(&chunk).expect("index chunk");
+
+    // Recherche via question en langage naturel
+    let results = storage
+        .search_fts("de quelle couleur est ma voiture ?", 3)
+        .expect("search");
+    assert_eq!(results.len(), 1, "La note 'Ma voiture est bleu' doit être trouvée via la question");
+    assert_eq!(results[0].title, "Voiture");
+
+    let question_results = storage
+        .search_question("de quelle couleur est ma voiture ?", 3)
+        .expect("search_question");
+    assert_eq!(question_results.len(), 1, "search_question doit également retrouver la note");
+}
+

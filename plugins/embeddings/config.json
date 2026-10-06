@@ -1,0 +1,40 @@
+{
+  "active_model_id": "all-MiniLM-L6-v2",
+  "available_models": [
+    {
+      "id": "all-MiniLM-L6-v2",
+      "name": "Sentence-Transformers all-MiniLM-L6-v2 (Standard Jeanne)",
+      "dimension": 384,
+      "max_seq_length": 512,
+      "language": "multilingue / anglais / français",
+      "size_mb": 80,
+      "model_file": "models/all-MiniLM-L6-v2.onnx",
+      "tokenizer_file": "models/tokenizer.json"
+    },
+    {
+      "id": "bge-small-en-v1.5",
+      "name": "BAAI BGE Small EN v1.5",
+      "dimension": 384,
+      "max_seq_length": 512,
+      "language": "anglais",
+      "size_mb": 130,
+      "model_file": "models/bge-small-en-v1.5.onnx",
+      "tokenizer_file": "models/bge-tokenizer.json"
+    },
+    {
+      "id": "multilingual-e5-small",
+      "name": "Intfloat Multilingual E5 Small",
+      "dimension": 384,
+      "max_seq_length": 512,
+      "language": "multilingue (100+ langues)",
+      "size_mb": 140,
+      "model_file": "models/multilingual-e5-small.onnx",
+      "tokenizer_file": "models/e5-tokenizer.json"
+    }
+  ],
+  "options": {
+    "normalize": true,
+    "batch_size": 32,
+    "execution_provider": "cpu"
+  }
+}

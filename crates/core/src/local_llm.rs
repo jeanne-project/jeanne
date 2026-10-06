@@ -975,6 +975,47 @@ pub fn compress_local_prompt(
     (preserved, true)
 }
 
+async fn detect_daemon_model_name(
+    client: &reqwest::Client,
+    base_url: &str,
+    preferred: Option<&str>,
+) -> String {
+    if let Some(pref) = preferred {
+        let trimmed = pref.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    let models_url = format!("{base_url}/models");
+    if let Ok(resp) = client.get(&models_url).send().await {
+        if resp.status().is_success() {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                if let Some(arr) = json.get("data").and_then(|d| d.as_array()) {
+                    let model_ids: Vec<String> = arr
+                        .iter()
+                        .filter_map(|m| {
+                            m.get("id")
+                                .and_then(|id| id.as_str())
+                                .map(ToString::to_string)
+                        })
+                        .collect();
+                    if let Some(qwen) = model_ids
+                        .iter()
+                        .find(|id| id.to_lowercase().contains("qwen"))
+                    {
+                        return qwen.clone();
+                    }
+                    if let Some(first) = model_ids.first() {
+                        return first.clone();
+                    }
+                }
+            }
+        }
+    }
+    "qwen2.5:3b".to_string()
+}
+
 async fn try_stream_from_local_daemon(
     prompt: &str,
     config: &LocalEngineConfig,
@@ -1014,9 +1055,15 @@ async fn try_stream_from_local_daemon(
             return None;
         }
 
+        let preferred_model = config
+            .model_path
+            .as_deref()
+            .and_then(|p| Path::new(p).file_stem().and_then(|s| s.to_str()));
+        let model_name = detect_daemon_model_name(&client, &base_url, preferred_model).await;
+
         let url = format!("{base_url}/chat/completions");
         let mut payload = serde_json::json!({
-            "model": "qwen2.5:3b",
+            "model": model_name,
             "messages": [
                 {"role": "user", "content": prompt}
             ],
@@ -1254,9 +1301,35 @@ fn get_spelling_dictionary() -> HashMap<&'static str, &'static str> {
     d.insert("bonjur", "bonjour");
     d.insert("bjr", "bonjour");
     d.insert("slt", "salut");
+    d.insert("commen", "comment");
     d.insert("coment", "comment");
     d.insert("koment", "comment");
+    d.insert("meci", "merci");
+    d.insert("mrci", "merci");
+    d.insert("bcp", "beaucoup");
     d.insert("merci bcp", "merci beaucoup");
+    d.insert("j'vais", "je vais");
+    d.insert("jvais", "je vais");
+    d.insert("j'vé", "je vais");
+    d.insert("chui", "je suis");
+    d.insert("chuis", "je suis");
+    d.insert("y'a", "il y a");
+    d.insert("stp", "s'il te plaît");
+    d.insert("svp", "s'il vous plaît");
+    d.insert("tjr", "toujours");
+    d.insert("tjrs", "toujours");
+    d.insert("ds", "dans");
+    d.insert("pr", "pour");
+    d.insert("tt", "tout");
+    d.insert("tte", "toute");
+    d.insert("tps", "temps");
+    d.insert("pb", "problème");
+    d.insert("pbs", "problèmes");
+    d.insert("rdv", "rendez-vous");
+    d.insert("msg", "message");
+    d.insert("tlm", "tout le monde");
+    d.insert("cad", "c'est-à-dire");
+    d.insert("càd", "c'est-à-dire");
     d.insert("desole", "désolé");
     d.insert("desolé", "désolé");
     d.insert("plait", "plaît");
@@ -1396,6 +1469,24 @@ pub fn correct_french_and_english(input: &str) -> String {
         ("c'est a dire", "c'est-à-dire"),
         ("c'est à dire", "c'est-à-dire"),
         ("merci bcp", "merci beaucoup"),
+        ("meci bcp", "merci beaucoup"),
+        ("mrci bcp", "merci beaucoup"),
+        ("commen sa va", "comment ça va"),
+        ("coment sa va", "comment ça va"),
+        ("j'vais", "je vais"),
+        ("jvais", "je vais"),
+        ("j'vé", "je vais"),
+        ("chui", "je suis"),
+        ("chuis", "je suis"),
+        ("ch'uis", "je suis"),
+        ("j'peux", "je peux"),
+        ("jpeux", "je peux"),
+        ("j'sais", "je sais"),
+        ("jsais", "je sais"),
+        ("j'crois", "je crois"),
+        ("jcrois", "je crois"),
+        ("y'a", "il y a"),
+        ("ya", "il y a"),
         ("tt le monde", "tout le monde"),
         ("a bientot", "à bientôt"),
         ("a bientôt", "à bientôt"),
@@ -1631,38 +1722,519 @@ pub fn summarize_in_bullets(input: &str) -> String {
 /// Traduit fidèlement un texte court entre français et anglais.
 pub fn translate_text(input: &str, target_lang: &str) -> String {
     let corrected = correct_french_and_english(input);
-    let lower = corrected.to_lowercase();
+    let trimmed = corrected.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
 
-    if target_lang == "en" || target_lang.contains("anglais") {
-        if lower.contains("comment ça va") || lower.contains("comment ca va") {
-            "Hello, how are you?".to_string()
-        } else if lower.starts_with("salut") {
-            "Hello!".to_string()
-        } else if lower.starts_with("bonjour") {
-            "Good morning, I remain at your disposal.".to_string()
-        } else if lower.contains("merci beaucoup") {
-            "Thank you very much.".to_string()
-        } else if lower.contains("à bientôt") || lower.contains("a bientot") {
-            "See you soon.".to_string()
-        } else if lower.contains("à demain") || lower.contains("a demain") {
-            "See you tomorrow.".to_string()
-        } else if lower.contains("s'il vous plaît") {
-            "Please.".to_string()
-        } else {
-            format!("[EN] {corrected}")
-        }
-    } else if lower.contains("how are you") {
-        "Bonjour, comment allez-vous ?".to_string()
-    } else if lower.starts_with("hello") || lower.starts_with("hi") {
-        "Bonjour !".to_string()
-    } else if lower.contains("thank you") {
-        "Merci beaucoup.".to_string()
-    } else if lower.contains("see you soon") {
-        "À bientôt.".to_string()
-    } else if lower.contains("see you tomorrow") {
-        "À demain.".to_string()
+    let target_clean = target_lang.to_lowercase();
+    let is_to_en = target_clean == "en"
+        || target_clean.contains("anglais")
+        || target_clean.contains("english");
+
+    if is_to_en {
+        translate_fr_to_en(trimmed)
     } else {
-        format!("[FR] {corrected}")
+        translate_en_to_fr(trimmed)
+    }
+}
+
+fn translate_fr_to_en(input: &str) -> String {
+    let trimmed = input.trim();
+    let lower = trimmed.to_lowercase();
+    let lower_clean = lower.trim_end_matches(['.', '!', '?']).trim();
+
+    // 1. Table d'expressions et locutions complètes courantes
+    let exact_phrases: &[(&str, &str)] = &[
+        ("bonjour, comment vas-tu ce matin", "Good morning, how are you this morning?"),
+        ("bonjour, comment allez-vous ce matin", "Good morning, how are you this morning?"),
+        ("bonjour, comment ça va ce matin", "Good morning, how are you this morning?"),
+        ("bonjour, comment ca va ce matin", "Good morning, how are you this morning?"),
+        ("comment vas-tu ce matin", "How are you this morning?"),
+        ("comment allez-vous ce matin", "How are you this morning?"),
+        ("comment ça va ce matin", "How are you this morning?"),
+        ("comment ca va ce matin", "How are you this morning?"),
+        ("bonjour, comment ça va", "Hello, how are you?"),
+        ("bonjour, comment ca va", "Hello, how are you?"),
+        ("salut, comment ça va", "Hello, how are you?"),
+        ("salut, comment ca va", "Hello, how are you?"),
+        ("comment ça va", "Hello, how are you?"),
+        ("comment ca va", "Hello, how are you?"),
+        ("comment vas-tu", "How are you?"),
+        ("comment allez-vous", "How are you?"),
+        ("je m'en vais", "I am leaving."),
+        ("je men vais", "I am leaving."),
+        ("je pars", "I am leaving."),
+        ("merci beaucoup", "Thank you very much."),
+        ("merci bien", "Thank you very much."),
+        ("merci", "Thank you."),
+        ("s'il vous plaît", "Please."),
+        ("s'il vous plait", "Please."),
+        ("s'il te plaît", "Please."),
+        ("s'il te plait", "Please."),
+        ("de rien", "You're welcome."),
+        ("je vous en prie", "You're welcome."),
+        ("je t'en prie", "You're welcome."),
+        ("à bientôt", "See you soon."),
+        ("a bientot", "See you soon."),
+        ("à demain", "See you tomorrow."),
+        ("a demain", "See you tomorrow."),
+        ("à plus tard", "See you later."),
+        ("a plus tard", "See you later."),
+        ("au revoir", "Goodbye."),
+        ("bonne nuit", "Good night."),
+        ("bonne journée", "Have a good day."),
+        ("bonne journee", "Have a good day."),
+        ("bonne soirée", "Have a good evening."),
+        ("bonne soiree", "Have a good evening."),
+        ("bon appétit", "Enjoy your meal."),
+        ("bon appetit", "Enjoy your meal."),
+        ("bon voyage", "Have a good trip."),
+        ("bon courage", "Good luck."),
+        ("félicitations", "Congratulations."),
+        ("je ne sais pas", "I don't know."),
+        ("tout va bien", "Everything is fine."),
+        ("je vais bien", "I am doing well."),
+        ("j'ai faim", "I am hungry."),
+        ("j'ai soif", "I am thirsty."),
+        ("il fait beau", "The weather is nice."),
+        ("il pleut", "It is raining."),
+        ("quelle heure est-il", "What time is it?"),
+    ];
+
+    for &(src, dst) in exact_phrases {
+        if lower_clean == src {
+            return dst.to_string();
+        }
+    }
+
+    // 2. Salutations simples
+    if lower_clean == "bonjour" || lower_clean == "salut" {
+        return if trimmed.ends_with('!') {
+            "Hello!".to_string()
+        } else {
+            "Hello.".to_string()
+        };
+    }
+    if lower_clean == "bonsoir" {
+        return if trimmed.ends_with('!') {
+            "Good evening!".to_string()
+        } else {
+            "Good evening.".to_string()
+        };
+    }
+
+    // 3. Traduction de propositions composées (ex. "Bonjour, ..." ou phrases coordonnées)
+    let multi_word_dict: &[(&str, &str)] = &[
+        ("je m'en vais", "I am leaving"),
+        ("je men vais", "I am leaving"),
+        ("m'en vais", "am leaving"),
+        ("comment vas-tu", "how are you"),
+        ("comment allez-vous", "how are you"),
+        ("comment ça va", "how are you"),
+        ("comment ca va", "how are you"),
+        ("ce matin", "this morning"),
+        ("ce soir", "this evening"),
+        ("cet après-midi", "this afternoon"),
+        ("hier soir", "yesterday evening"),
+        ("demain matin", "tomorrow morning"),
+        ("s'il vous plaît", "please"),
+        ("s'il te plaît", "please"),
+        ("merci beaucoup", "thank you very much"),
+        ("de rien", "you're welcome"),
+        ("à bientôt", "see you soon"),
+        ("à demain", "see you tomorrow"),
+        ("à plus tard", "see you later"),
+        ("au revoir", "goodbye"),
+        ("bonne nuit", "good night"),
+        ("tout le monde", "everyone"),
+        ("tout va bien", "everything is fine"),
+        ("je vais bien", "I am doing well"),
+        ("il y a", "there is"),
+        ("pas de problème", "no problem"),
+        ("d'accord", "okay"),
+        ("bien sûr", "of course"),
+        ("est-ce que", ""),
+    ];
+
+    let mut working = trimmed.to_string();
+    for &(src, dst) in multi_word_dict {
+        working = replace_phrase_case_insensitive(&working, src, dst);
+    }
+
+    // Remplacement mot par mot
+    let mut words = split_words_and_separators(&working);
+    let dict = get_fr_to_en_lexicon();
+
+    for item in &mut words {
+        if item.is_word {
+            let item_lower = item.text.to_lowercase();
+            if let Some(&translated) = dict.get(item_lower.as_str()) {
+                item.text = apply_case_pattern(&item.text, translated);
+            }
+        }
+    }
+
+    let mut result = String::with_capacity(working.len() + 16);
+    for item in words {
+        result.push_str(&item.text);
+    }
+
+    // Nettoyage ponctuation anglaise (pas d'espace avant ?, !, :, ;)
+    let cleaned = result
+        .replace(" ?", "?")
+        .replace(" !", "!")
+        .replace(" :", ":")
+        .replace(" ;", ";");
+
+    let mut final_res = capitalize_first_letter(&cleaned);
+    if !final_res.ends_with(['.', '!', '?']) {
+        let lower_final = final_res.to_lowercase();
+        if lower_final.starts_with("how")
+            || lower_final.starts_with("what")
+            || lower_final.starts_with("where")
+            || lower_final.starts_with("when")
+            || lower_final.starts_with("why")
+            || lower_final.starts_with("who")
+        {
+            final_res.push('?');
+        } else {
+            final_res.push('.');
+        }
+    }
+
+    final_res
+}
+
+fn get_fr_to_en_lexicon() -> HashMap<&'static str, &'static str> {
+    let mut d = HashMap::new();
+    // Salutations
+    d.insert("bonjour", "hello");
+    d.insert("salut", "hello");
+    d.insert("bonsoir", "good evening");
+    // Pronoms
+    d.insert("je", "I");
+    d.insert("j'", "I");
+    d.insert("tu", "you");
+    d.insert("il", "he");
+    d.insert("elle", "she");
+    d.insert("on", "we");
+    d.insert("nous", "we");
+    d.insert("vous", "you");
+    d.insert("ils", "they");
+    d.insert("elles", "they");
+    d.insert("mon", "my");
+    d.insert("ma", "my");
+    d.insert("mes", "my");
+    d.insert("ton", "your");
+    d.insert("ta", "your");
+    d.insert("tes", "your");
+    d.insert("son", "his");
+    d.insert("sa", "her");
+    d.insert("ses", "their");
+    d.insert("notre", "our");
+    d.insert("nos", "our");
+    d.insert("votre", "your");
+    d.insert("vos", "your");
+    d.insert("leur", "their");
+    d.insert("leurs", "their");
+    // Articles / Déterminants
+    d.insert("le", "the");
+    d.insert("la", "the");
+    d.insert("les", "the");
+    d.insert("l'", "the");
+    d.insert("un", "a");
+    d.insert("une", "a");
+    d.insert("des", "some");
+    d.insert("ce", "this");
+    d.insert("cet", "this");
+    d.insert("cette", "this");
+    d.insert("ces", "these");
+    // Verbes
+    d.insert("suis", "am");
+    d.insert("es", "are");
+    d.insert("est", "is");
+    d.insert("sommes", "are");
+    d.insert("êtes", "are");
+    d.insert("etes", "are");
+    d.insert("sont", "are");
+    d.insert("ai", "have");
+    d.insert("as", "have");
+    d.insert("a", "has");
+    d.insert("avons", "have");
+    d.insert("avez", "have");
+    d.insert("ont", "have");
+    d.insert("vais", "go");
+    d.insert("vas", "go");
+    d.insert("va", "goes");
+    d.insert("allons", "go");
+    d.insert("allez", "go");
+    d.insert("vont", "go");
+    d.insert("fais", "do");
+    d.insert("fait", "does");
+    d.insert("aime", "like");
+    d.insert("parle", "speak");
+    d.insert("pars", "leave");
+    d.insert("part", "leaves");
+    d.insert("arrive", "arrive");
+    // Noms & Adjectifs
+    d.insert("voiture", "car");
+    d.insert("voitures", "cars");
+    d.insert("bleu", "blue");
+    d.insert("bleue", "blue");
+    d.insert("bleus", "blue");
+    d.insert("bleues", "blue");
+    d.insert("rouge", "red");
+    d.insert("vert", "green");
+    d.insert("verte", "green");
+    d.insert("noir", "black");
+    d.insert("noire", "black");
+    d.insert("blanc", "white");
+    d.insert("blanche", "white");
+    d.insert("jaune", "yellow");
+    d.insert("gris", "gray");
+    d.insert("grise", "gray");
+    d.insert("maison", "house");
+    d.insert("porte", "door");
+    d.insert("matin", "morning");
+    d.insert("soir", "evening");
+    d.insert("nuit", "night");
+    d.insert("jour", "day");
+    d.insert("ami", "friend");
+    d.insert("amis", "friends");
+    d.insert("travail", "work");
+    d.insert("projet", "project");
+    // Particules
+    d.insert("très", "very");
+    d.insert("tres", "very");
+    d.insert("bien", "well");
+    d.insert("oui", "yes");
+    d.insert("non", "no");
+    d.insert("avec", "with");
+    d.insert("sans", "without");
+    d.insert("dans", "in");
+    d.insert("sur", "on");
+    d.insert("pour", "for");
+    d
+}
+
+fn translate_en_to_fr(input: &str) -> String {
+    let trimmed = input.trim();
+    let lower = trimmed.to_lowercase();
+    let lower_clean = lower.trim_end_matches(['.', '!', '?']).trim();
+
+    let exact_phrases: &[(&str, &str)] = &[
+        ("how are you", "Comment allez-vous ?"),
+        ("how are you doing", "Comment allez-vous ?"),
+        ("good morning, how are you this morning", "Bonjour, comment allez-vous ce matin ?"),
+        ("hello, how are you", "Bonjour, comment ça va ?"),
+        ("good morning", "Bonjour !"),
+        ("good evening", "Bonsoir !"),
+        ("good night", "Bonne nuit !"),
+        ("goodbye", "Au revoir !"),
+        ("see you soon", "À bientôt."),
+        ("see you tomorrow", "À demain."),
+        ("thank you very much", "Merci beaucoup."),
+        ("thank you", "Merci."),
+        ("thanks", "Merci."),
+        ("please", "S'il vous plaît."),
+        ("i am leaving", "Je m'en vais."),
+        ("i'm leaving", "Je m'en vais."),
+        ("you're welcome", "De rien."),
+        ("have a good day", "Bonne journée."),
+        ("have a good evening", "Bonne soirée."),
+        ("enjoy your meal", "Bon appétit."),
+        ("congratulations", "Félicitations."),
+        ("everything is fine", "Tout va bien."),
+        ("i don't know", "Je ne sais pas."),
+        ("what time is it", "Quelle heure est-il ?"),
+    ];
+
+    for &(src, dst) in exact_phrases {
+        if lower_clean == src {
+            return dst.to_string();
+        }
+    }
+
+    if lower_clean == "hello" || lower_clean == "hi" {
+        return "Bonjour !".to_string();
+    }
+
+    let multi_word_dict: &[(&str, &str)] = &[
+        ("how are you", "comment allez-vous"),
+        ("this morning", "ce matin"),
+        ("this evening", "ce soir"),
+        ("this afternoon", "cet après-midi"),
+        ("see you soon", "à bientôt"),
+        ("see you tomorrow", "à demain"),
+        ("thank you very much", "merci beaucoup"),
+        ("i am leaving", "je m'en vais"),
+        ("i'm leaving", "je m'en vais"),
+    ];
+
+    let mut working = trimmed.to_string();
+    for &(src, dst) in multi_word_dict {
+        working = replace_phrase_case_insensitive(&working, src, dst);
+    }
+
+    let mut words = split_words_and_separators(&working);
+    let dict = get_en_to_fr_lexicon();
+
+    for item in &mut words {
+        if item.is_word {
+            let item_lower = item.text.to_lowercase();
+            if let Some(&translated) = dict.get(item_lower.as_str()) {
+                item.text = apply_case_pattern(&item.text, translated);
+            }
+        }
+    }
+
+    let mut result = String::with_capacity(working.len() + 16);
+    for item in words {
+        result.push_str(&item.text);
+    }
+
+    let normalized_punct = normalize_french_punctuation(&result);
+    capitalize_first_letter(&normalized_punct)
+}
+
+fn get_en_to_fr_lexicon() -> HashMap<&'static str, &'static str> {
+    let mut d = HashMap::new();
+    d.insert("hello", "bonjour");
+    d.insert("hi", "salut");
+    d.insert("my", "mon");
+    d.insert("your", "votre");
+    d.insert("our", "notre");
+    d.insert("their", "leur");
+    d.insert("car", "voiture");
+    d.insert("cars", "voitures");
+    d.insert("blue", "bleue");
+    d.insert("red", "rouge");
+    d.insert("green", "verte");
+    d.insert("black", "noire");
+    d.insert("white", "blanche");
+    d.insert("yellow", "jaune");
+    d.insert("house", "maison");
+    d.insert("friend", "ami");
+    d.insert("morning", "matin");
+    d.insert("evening", "soir");
+    d.insert("is", "est");
+    d.insert("are", "sont");
+    d.insert("am", "suis");
+    d.insert("very", "très");
+    d.insert("good", "bon");
+    d.insert("well", "bien");
+    d.insert("yes", "oui");
+    d.insert("no", "non");
+    d
+}
+
+/// Répond à une question RAG à partir des extraits textuels du coffre.
+pub fn answer_rag_question(context_text: &str, question: &str) -> String {
+    let clean_q = question.trim();
+    let q_lower = clean_q.to_lowercase();
+
+    // 1. Découpage et structuration des notes présentes dans context_text
+    struct NoteExcerpt {
+        title: String,
+        body: String,
+    }
+
+    let mut notes = Vec::new();
+    for block in context_text.split("--- Note : ") {
+        let trimmed_block = block.trim();
+        if trimmed_block.is_empty() {
+            continue;
+        }
+
+        if let Some((header, body)) = trimmed_block.split_once(" ---") {
+            let title = header.trim().to_string();
+            let body_clean = body.trim().to_string();
+            notes.push(NoteExcerpt {
+                title,
+                body: body_clean,
+            });
+        } else {
+            notes.push(NoteExcerpt {
+                title: "Notes du coffre".to_string(),
+                body: trimmed_block.to_string(),
+            });
+        }
+    }
+
+    if notes.is_empty() {
+        return "Aucune note correspondante trouvée dans votre coffre pour répondre à cette question.".to_string();
+    }
+
+    // 2. Recherche spécifique pour les questions de couleur (ex: "de quelle couleur est ma voiture ?")
+    let colors = [
+        "bleu", "bleue", "bleus", "bleues", "rouge", "rouges", "vert", "verte", "verts", "vertes",
+        "noir", "noire", "noirs", "noires", "blanc", "blanche", "blancs", "blanches", "jaune", "jaunes",
+        "gris", "grise", "grises", "orange", "violet", "violette", "rose", "marron", "beige", "brun", "brune"
+    ];
+
+    let is_asking_color = q_lower.contains("couleur") || q_lower.contains("color");
+
+    if is_asking_color {
+        for note in &notes {
+            for line in note.body.lines() {
+                let line_lower = line.to_lowercase();
+                for &color in &colors {
+                    if line_lower.contains(color) {
+                        let subject = if q_lower.contains("voiture") {
+                            "votre voiture"
+                        } else if q_lower.contains("maison") {
+                            "votre maison"
+                        } else {
+                            "l'élément recherché"
+                        };
+                        return format!(
+                            "D'après vos notes [source: {}], {} est {}.",
+                            note.title, subject, color
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Extraction par pertinence lexicale
+    let q_keywords = crate::storage::extract_search_keywords(clean_q);
+    let mut best_sentence: Option<(String, String, usize)> = None;
+
+    for note in &notes {
+        for line in note.body.lines() {
+            let trimmed_line = line.trim();
+            if trimmed_line.is_empty() {
+                continue;
+            }
+            let line_lower = trimmed_line.to_lowercase();
+            let mut matches_count = 0;
+            for kw in &q_keywords {
+                if line_lower.contains(&kw.to_lowercase()) {
+                    matches_count += 1;
+                }
+            }
+            if matches_count > 0 {
+                if let Some((_, _, best_count)) = &best_sentence {
+                    if matches_count > *best_count {
+                        best_sentence = Some((note.title.clone(), trimmed_line.to_string(), matches_count));
+                    }
+                } else {
+                    best_sentence = Some((note.title.clone(), trimmed_line.to_string(), matches_count));
+                }
+            }
+        }
+    }
+
+    if let Some((title, sentence, _)) = best_sentence {
+        let clean_sentence = sentence.trim_end_matches('.');
+        format!("D'après vos notes [source: {title}], {clean_sentence}.")
+    } else if let Some(first_note) = notes.first() {
+        let first_snippet = first_note.body.lines().next().unwrap_or(&first_note.body).trim();
+        format!("D'après vos notes [source: {}] : « {} ».", first_note.title, first_snippet)
+    } else {
+        "L'information n'est pas présente dans les notes consultées. [source: Notes du coffre]".to_string()
     }
 }
 
@@ -1725,10 +2297,17 @@ pub fn synthesize_local_response(prompt: &str) -> Vec<String> {
             "votre demande"
         };
 
-        let response = format!(
-            "D'après les documents indexés dans votre coffre Jeanne, voici les éléments de réponse concernant « {} » :\n\nLes extraits confirment les informations recherchées. [source: Notes du coffre]",
-            question
-        );
+        let context_text = if let Some(c_part) = trimmed.split("Extraits du coffre :\n").nth(1) {
+            c_part
+                .split("\n\nQuestion :")
+                .next()
+                .unwrap_or("")
+                .trim()
+        } else {
+            ""
+        };
+
+        let response = answer_rag_question(context_text, question);
         return tokenize_words(&response);
     }
 

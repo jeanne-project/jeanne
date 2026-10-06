@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "id": "org.jeanneproject.parser.pdf",
+  "name": "PDF Structured Markdown Parser",
+  "version": "1.0.0",
+  "description": "Parser autonome de documents PDF en Markdown structuré avec extraction de titres, métadonnées et tableaux.",
+  "author": "Jeanne Project",
+  "entrypoint": {
+    "windows": "bin/pdf-parser.exe",
+    "linux": "bin/pdf-parser"
+  },
+  "lifecycle": "on_demand",
+  "timeout_seconds": 120,
+  "capabilities": [
+    {
+      "type": "document_parser",
+      "supported_extensions": [".pdf"],
+      "supported_mimetypes": ["application/pdf"],
+      "extract_tables": true,
+      "extract_metadata": true
+    }
+  ]
+}

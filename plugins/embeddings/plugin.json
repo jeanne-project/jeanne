@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "id": "org.jeanneproject.embeddings.generator",
+  "name": "Text Embeddings Generator (Vector RAG)",
+  "version": "1.0.0",
+  "description": "Générateur d'embeddings vectoriels denses pour la recherche sémantique hybride sqlite-vec. Modèle par défaut all-MiniLM-L6-v2 (dim: 384), interchangeable à la volée.",
+  "author": "Jeanne Project",
+  "entrypoint": {
+    "windows": "bin/jeanne-embeddings.exe",
+    "linux": "bin/jeanne-embeddings"
+  },
+  "lifecycle": "on_demand",
+  "idle_timeout_seconds": 60,
+  "timeout_seconds": 30,
+  "capabilities": [
+    {
+      "type": "embeddings_generator",
+      "default_model": "all-MiniLM-L6-v2",
+      "default_dimension": 384,
+      "max_sequence_length": 512,
+      "normalize_embeddings": true,
+      "supports_batching": true
+    }
+  ]
+}

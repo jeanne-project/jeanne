@@ -581,7 +581,12 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Resul
             .storage
             .lock()
             .map_err(|e| format!("Erreur accès base de données : {e}"))?;
-        storage.search_fts(clean_q, 3).unwrap_or_default()
+        let res = storage.search_question(clean_q, 3).unwrap_or_default();
+        if res.is_empty() {
+            storage.search_fts(clean_q, 3).unwrap_or_default()
+        } else {
+            res
+        }
     };
 
     if search_results.is_empty() {
@@ -593,10 +598,30 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Resul
 
     let mut context_chunks = Vec::new();
     for hit in &search_results {
+        let note_body = {
+            let note_path = state.vault_path.join(&hit.file_path);
+            if note_path.exists() {
+                if let Ok(raw) = tokio::fs::read_to_string(&note_path).await {
+                    let (_, body) = jeanne_core::parse_markdown(&raw)
+                        .unwrap_or_else(|_| (jeanne_core::NoteFrontmatter::default(), raw.clone()));
+                    let clean_body = body.trim().to_string();
+                    if clean_body.is_empty() {
+                        hit.snippet.replace("<mark>", "").replace("</mark>", "")
+                    } else {
+                        clean_body
+                    }
+                } else {
+                    hit.snippet.replace("<mark>", "").replace("</mark>", "")
+                }
+            } else {
+                hit.snippet.replace("<mark>", "").replace("</mark>", "")
+            }
+        };
+
         context_chunks.push(format!(
             "--- Note : {} ---\n{}",
             hit.title,
-            hit.snippet.replace("<mark>", "").replace("</mark>", "")
+            note_body
         ));
     }
     let context_text = context_chunks.join("\n\n");
