@@ -68,6 +68,18 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: Build Subprocess Plugins
+        run: |
+          mkdir -p plugins/embeddings/bin plugins/llm-runner/bin
+          (cd plugins/embeddings && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/jeanne-embeddings .)
+          (cd plugins/llm-runner && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/jeanne-llm-runner .)
+
       - name: Run Cargo Tests (Workspace)
         run: cargo test --workspace --verbose
 
