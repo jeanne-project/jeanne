@@ -392,7 +392,7 @@ fn get_default_model_path() -> String {
         p.to_string_lossy().to_string()
     } else {
         jeanne_core::resolve_default_model_dir()
-            .join("qwen2.5-3b-instruct-q4_k_m.gguf")
+            .join("Qwen3.5-2B-Q4_K_M.gguf")
             .to_string_lossy()
             .to_string()
     }
@@ -414,6 +414,23 @@ async fn list_available_models(
     let currently_loaded = state.local_engine.loaded_model_path().await;
     let models = jeanne_core::discover_models(currently_loaded.as_deref());
     Ok(models)
+}
+
+/// Interroge un serveur d'inférence distant compatible OpenAI pour lister les modèles disponibles.
+#[tauri::command]
+async fn fetch_remote_server_models(
+    endpoint: String,
+    api_key: Option<String>,
+) -> Result<Vec<String>, String> {
+    jeanne_core::LocalLlmEngine::fetch_remote_models(&endpoint, api_key.as_deref())
+        .await
+        .map_err(|e| format!("{e}"))
+}
+
+/// Indique si l'inférence est prête (modèle GGUF en mémoire vive OU serveur personnalisé configuré).
+#[tauri::command]
+async fn is_inference_ready(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.local_engine.is_inference_ready().await)
 }
 
 #[tauri::command]
@@ -506,9 +523,9 @@ async fn ai_process_clipboard(
         return Err("Le presse-papier est vide ou ne contient pas de texte".to_string());
     }
 
-    if !state.local_engine.is_model_loaded().await {
+    if !state.local_engine.is_inference_ready().await {
         return Err(
-            "Le modèle local (Qwen 3B) n'est pas chargé.\nVeuillez le charger depuis le tableau de bord pour activer les actions IA du presse-papier."
+            "Aucun moteur d'inférence n'est prêt.\nVeuillez charger un modèle local ou configurer un serveur d'inférence personnalisé dans les paramètres."
                 .to_string(),
         );
     }
@@ -624,7 +641,7 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Resul
     }
     let context_text = context_chunks.join("\n\n");
 
-    if state.local_engine.is_model_loaded().await {
+    if state.local_engine.is_inference_ready().await {
         let prompt = format!(
             "Tu es Jeanne, assistant de connaissances. Réponds à la question suivante en te basant STRICTEMENT sur les extraits du coffre fournis ci-dessous. Si l'information n'est pas présente, indique-le honnêtement. Cite la note source entre crochets [source: titre].\n\nExtraits du coffre :\n{context_text}\n\nQuestion : {clean_q}\n\nRéponse :"
         );
@@ -643,7 +660,7 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Resul
         Ok(answer.trim().to_string())
     } else {
         let mut response = format!(
-            "🔍 **Notes correspondantes trouvées ({})** *(Modèle local déchargé)* :\n\n",
+            "🔍 **Notes correspondantes trouvées ({})** *(Inférence indisponible)* :\n\n",
             search_results.len()
         );
         for hit in search_results {
@@ -654,7 +671,7 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Resul
                 hit.snippet.replace("<mark>", "**").replace("</mark>", "**")
             ));
         }
-        response.push_str("💡 *Chargez le modèle local (Qwen 3B) dans l'accueil pour obtenir une réponse synthétisée par IA.*");
+        response.push_str("💡 *Chargez un modèle local ou configurez un serveur d'inférence personnalisé dans les paramètres pour obtenir une réponse synthétisée par IA.*");
         Ok(response)
     }
 }
@@ -859,7 +876,9 @@ pub fn run() {
             stop_meeting_recording,
             get_meeting_recording_status,
             list_meeting_sessions,
-            seek_meeting_audio
+            seek_meeting_audio,
+            fetch_remote_server_models,
+            is_inference_ready
         ])
         .setup(|app| {
             tracing::info!("Initialisation des sous-systèmes Jeanne Desktop...");

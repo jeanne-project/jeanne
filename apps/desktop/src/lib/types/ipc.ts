@@ -77,6 +77,8 @@ export interface LocalEngineConfig {
   max_tokens: number;
   allow_extended_context?: boolean;
   daemon_endpoint?: string | null;
+  daemon_api_key?: string | null;
+  daemon_model?: string | null;
   expected_sha256?: string | null;
 }
 
@@ -110,6 +112,8 @@ export interface IpcCommands {
   list_audio_devices(): Promise<AudioDevicesReport>;
   transcribe_pcm_chunk(samples: number[], sample_rate: number): Promise<string>;
   synthesize_text_to_audio(text: string): Promise<number[]>;
+  fetch_remote_server_models(endpoint: string, api_key?: string | null): Promise<string[]>;
+  is_inference_ready(): Promise<boolean>;
 }
 
 export type VoiceState = 'Idle' | 'Listening' | 'Transcribing' | 'Thinking' | 'Speaking' | 'Error';

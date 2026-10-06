@@ -152,7 +152,7 @@ func handleRequest(req *JSONRPCRequest) {
 		state.modelPath = p.ModelPath
 		state.modelName = filepath.Base(p.ModelPath)
 		if state.modelName == "" || state.modelName == "." {
-			state.modelName = "qwen2.5-3b-instruct-q4_k_m.gguf"
+			state.modelName = "Qwen3.5-2B-Q4_K_M.gguf"
 		}
 
 		nameLower := strings.ToLower(state.modelName)

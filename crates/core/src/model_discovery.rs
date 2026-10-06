@@ -246,13 +246,22 @@ pub fn discover_models_in_dirs(
         }
     }
 
-    // Tri : Modèle chargé en premier, puis Qwen 3B, puis par ordre alphabétique
+    // Tri : Modèle chargé en premier, puis Qwen 2B/3.5 (recommandé), puis autres Qwen (ex: 3B), puis par ordre alphabétique
     discovered.sort_by(|a, b| {
         if a.is_loaded != b.is_loaded {
             return b.is_loaded.cmp(&a.is_loaded);
         }
-        let a_is_qwen = a.name.to_lowercase().contains("qwen");
-        let b_is_qwen = b.name.to_lowercase().contains("qwen");
+        let a_lower = a.name.to_lowercase();
+        let b_lower = b.name.to_lowercase();
+        let a_is_qwen2b =
+            a_lower.contains("qwen") && (a_lower.contains("2b") || a_lower.contains("3.5"));
+        let b_is_qwen2b =
+            b_lower.contains("qwen") && (b_lower.contains("2b") || b_lower.contains("3.5"));
+        if a_is_qwen2b != b_is_qwen2b {
+            return b_is_qwen2b.cmp(&a_is_qwen2b);
+        }
+        let a_is_qwen = a_lower.contains("qwen");
+        let b_is_qwen = b_lower.contains("qwen");
         if a_is_qwen != b_is_qwen {
             return b_is_qwen.cmp(&a_is_qwen);
         }
@@ -316,6 +325,8 @@ pub fn resolve_model_path_in_dirs(requested: Option<&str>, dirs: &[PathBuf]) -> 
             }
         }
     } else {
+        let mut best_qwen3b: Option<PathBuf> = None;
+        let mut best_qwen: Option<PathBuf> = None;
         let mut first_gguf: Option<PathBuf> = None;
 
         for dir in dirs {
@@ -342,9 +353,24 @@ pub fn resolve_model_path_in_dirs(requested: Option<&str>, dirs: &[PathBuf]) -> 
                         .map(|n| n.to_string_lossy().to_lowercase())
                         .unwrap_or_default();
 
-                    // Priorité absolue : modèle Qwen 3B recommandé
-                    if file_name.contains("qwen") && file_name.contains("3b") {
+                    // Priorité 1 : Modèle Qwen 3.5 2B recommandé
+                    if file_name.contains("qwen")
+                        && (file_name.contains("2b") || file_name.contains("3.5"))
+                    {
                         return Some(entry_path);
+                    }
+
+                    // Priorité 2 : Rétrocompatibilité Qwen 2.5 3B
+                    if file_name.contains("qwen")
+                        && file_name.contains("3b")
+                        && best_qwen3b.is_none()
+                    {
+                        best_qwen3b = Some(entry_path.clone());
+                    }
+
+                    // Priorité 3 : Tout autre modèle Qwen
+                    if file_name.contains("qwen") && best_qwen.is_none() {
+                        best_qwen = Some(entry_path.clone());
                     }
 
                     if first_gguf.is_none() {
@@ -354,9 +380,17 @@ pub fn resolve_model_path_in_dirs(requested: Option<&str>, dirs: &[PathBuf]) -> 
             }
         }
 
+        if let Some(qwen3b) = best_qwen3b {
+            return Some(qwen3b);
+        }
+
+        if let Some(qwen) = best_qwen {
+            return Some(qwen);
+        }
+
         if let Some(any_gguf) = first_gguf {
             tracing::warn!(
-                "[ModelDiscovery] [REPLI] Aucun modèle Qwen 3B recommandé trouvé dans les dossiers candidats. Repli sur le premier modèle GGUF disponible : {}",
+                "[ModelDiscovery] [REPLI] Aucun modèle Qwen recommandé (Qwen3.5-2B / Qwen2.5-3B) trouvé dans les dossiers candidats. Repli sur le premier modèle GGUF disponible : {}",
                 any_gguf.display()
             );
             return Some(any_gguf);

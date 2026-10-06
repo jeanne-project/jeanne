@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-is-inference-ready"
+description = "Enables the is_inference_ready command without any pre-configured scope."
+commands.allow = ["is_inference_ready"]
+
+[[permission]]
+identifier = "deny-is-inference-ready"
+description = "Denies the is_inference_ready command without any pre-configured scope."
+commands.deny = ["is_inference_ready"]
