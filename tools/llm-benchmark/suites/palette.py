@@ -10,6 +10,12 @@ from .base import AssertionResult, TestCase
 
 CATEGORY_PALETTE = "Actions Palette IA (/rephrase, /tldr, /trad)"
 
+SYSTEM_PALETTE_PROMPT = (
+    "Tu es l'assistant de productivité de la palette rapide Jeanne. "
+    "Exécute fidèlement l'action demandée. "
+    "Renvoie UNIQUEMENT le résultat attendu, sans salutation, ni bavardage, ni commentaire."
+)
+
 
 def check_no_chitchat(response: str) -> AssertionResult:
     """Verifies that the LLM did not add conversational framing (critical for clipboard replacement)."""
@@ -100,14 +106,15 @@ def get_palette_test_cases() -> List[TestCase]:
             category=CATEGORY_PALETTE,
             description="Reformulation d'un message SMS/familier en un style professionnel et fluide pour email.",
             messages=[
+                {"role": "system", "content": SYSTEM_PALETTE_PROMPT},
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": (
                         "Reformule le texte ci-dessous avec un ton professionnel et fluide. "
                         "Sois clair et concis. Renvoie UNIQUEMENT le texte reformulé, sans commentaire ni salutation :\n\n"
                         f"{input_text_01}"
                     ),
-                }
+                },
             ],
             evaluator=eval_rephrase_01,
         )
@@ -156,14 +163,15 @@ def get_palette_test_cases() -> List[TestCase]:
             category=CATEGORY_PALETTE,
             description="Élagage d'un paragraphe verbeux pour ne garder que la substance technique en moins de 22 mots.",
             messages=[
+                {"role": "system", "content": SYSTEM_PALETTE_PROMPT},
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": (
                         "Reformule le texte ci-dessous avec un ton concis et percutant. "
                         "Sois clair et concis. Renvoie UNIQUEMENT le texte reformulé, sans commentaire ni salutation :\n\n"
                         f"{input_text_02}"
                     ),
-                }
+                },
             ],
             evaluator=eval_rephrase_02,
         )
@@ -223,14 +231,15 @@ def get_palette_test_cases() -> List[TestCase]:
             category=CATEGORY_PALETTE,
             description="Génération stricte de 3 puces clés concises pour résumer un document technique dans le presse-papier.",
             messages=[
+                {"role": "system", "content": SYSTEM_PALETTE_PROMPT},
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": (
                         "Résume le texte suivant sous forme de 3 puces clés concises commençant par un tiret (-). "
                         "Renvoie UNIQUEMENT les puces :\n\n"
                         f"{input_text_03}"
                     ),
-                }
+                },
             ],
             evaluator=eval_tldr_03,
         )
@@ -282,14 +291,15 @@ def get_palette_test_cases() -> List[TestCase]:
             category=CATEGORY_PALETTE,
             description="Traduction directe d'une phrase technique en anglais avec terminologie exacte et zéro blabla.",
             messages=[
+                {"role": "system", "content": SYSTEM_PALETTE_PROMPT},
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": (
                         "Traduis fidèlement le texte suivant en anglais. "
                         "Renvoie UNIQUEMENT la traduction sans commentaire :\n\n"
                         f"{input_text_04}"
                     ),
-                }
+                },
             ],
             evaluator=eval_trad_04,
         )
@@ -333,14 +343,15 @@ def get_palette_test_cases() -> List[TestCase]:
             category=CATEGORY_PALETTE,
             description="Traduction directe d'une contrainte technique en français fluide.",
             messages=[
+                {"role": "system", "content": SYSTEM_PALETTE_PROMPT},
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": (
                         "Traduis fidèlement le texte suivant en français. "
                         "Renvoie UNIQUEMENT la traduction sans commentaire :\n\n"
                         f"{input_text_05}"
                     ),
-                }
+                },
             ],
             evaluator=eval_trad_05,
         )
@@ -394,15 +405,16 @@ def get_palette_test_cases() -> List[TestCase]:
             category=CATEGORY_PALETTE,
             description="Transformation d'une phrase de réflexion en tâche Markdown '- [ ] ...' prête pour Inbox.md.",
             messages=[
+                {"role": "system", "content": SYSTEM_PALETTE_PROMPT},
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": (
                         "Tu es l'assistant de capture de la palette Jeanne. Extrais l'action à accomplir "
                         "sous la forme exacte d'une case à cocher Markdown '- [ ] Action concise et impérative'. "
                         "Renvoie UNIQUEMENT cette ligne sans texte additionnel :\n\n"
                         f"{input_text_06}"
                     ),
-                }
+                },
             ],
             evaluator=eval_todo_06,
         )
@@ -449,14 +461,15 @@ def get_palette_test_cases() -> List[TestCase]:
             category=CATEGORY_PALETTE,
             description="Génération d'une description percutante en une phrase (< 20 mots) pour un signet technique.",
             messages=[
+                {"role": "system", "content": SYSTEM_PALETTE_PROMPT},
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": (
                         "Génère une description ultra-courte (1 phrase de 15 mots maximum) pour ce signet web technique. "
                         "Renvoie UNIQUEMENT la description sans guillemets ni introduction :\n\n"
                         f"{input_text_07}"
                     ),
-                }
+                },
             ],
             evaluator=eval_bookmark_07,
         )

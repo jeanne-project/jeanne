@@ -62,6 +62,21 @@ class LlmClient:
                     use_vulkan=self.use_vulkan,
                 )
 
+    @staticmethod
+    def normalize_messages(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Ensures messages contain at least one 'user' message for strict chat templates."""
+        if not messages:
+            return [{"role": "user", "content": ""}]
+        if any(m.get("role") == "user" for m in messages):
+            return messages
+        normalized = []
+        for i, m in enumerate(messages):
+            if i == len(messages) - 1 and m.get("role") == "system":
+                normalized.append({"role": "user", "content": m.get("content", "")})
+            else:
+                normalized.append(dict(m))
+        return normalized
+
     def generate(
         self,
         messages: List[Dict[str, str]],
@@ -72,18 +87,20 @@ class LlmClient:
         Returns:
             (response_text, ttft_ms, total_latency_ms, tokens_count, tokens_per_sec)
         """
+        norm_messages = self.normalize_messages(messages)
+
         if self.mock_mode:
-            return self._mock_generate(messages, params)
+            return self._mock_generate(norm_messages, params)
 
         if self.is_embedded and self.embedded_engine:
-            return self.embedded_engine.generate(messages, params)
+            return self.embedded_engine.generate(norm_messages, params)
 
         if not self.endpoint:
             raise ValueError(
                 f"Aucun endpoint HTTP ni fichier GGUF valide spécifié pour le modèle '{self.model}'."
             )
 
-        return self._http_generate(messages, params)
+        return self._http_generate(norm_messages, params)
 
     def _http_generate(
         self,

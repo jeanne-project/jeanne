@@ -400,6 +400,10 @@ def run_benchmark_for_model_profile(
                 response_text=response_text,
                 assertions=assertions,
                 thinking_tokens=thinking_tokens,
+                messages=tc.messages,
+                error_traceback=None,
+                engine="embedded" if client.is_embedded else "http",
+                endpoint=file_path if client.is_embedded else endpoint,
             )
 
             duration_s = total_latency_ms / 1000.0
@@ -419,7 +423,11 @@ def run_benchmark_for_model_profile(
                     print(f"     {icon} {ass.name}: {ass.details}")
 
         except Exception as e:
+            import traceback
+            tb_str = traceback.format_exc()
             print(f"\033[31mERROR: {str(e)}\033[0m")
+            if verbose:
+                print(f"     \033[33mTraceback:\n{tb_str.strip()}\033[0m")
             test_res = TestResult(
                 test_id=tc.id,
                 test_name=tc.name,
@@ -437,6 +445,10 @@ def run_benchmark_for_model_profile(
                 assertions=[],
                 thinking_tokens=0,
                 error=str(e),
+                messages=tc.messages,
+                error_traceback=tb_str,
+                engine="embedded" if client.is_embedded else "http",
+                endpoint=file_path if client.is_embedded else endpoint,
             )
 
         suite_result.test_results.append(test_res)

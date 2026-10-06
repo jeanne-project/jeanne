@@ -74,6 +74,10 @@ class TestResult:
     assertions: List[AssertionResult]
     thinking_tokens: int = 0
     error: Optional[str] = None
+    messages: List[Dict[str, str]] = field(default_factory=list)
+    error_traceback: Optional[str] = None
+    engine: Optional[str] = None
+    endpoint: Optional[str] = None
 
 
 @dataclass

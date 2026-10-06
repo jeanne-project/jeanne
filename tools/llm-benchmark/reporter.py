@@ -194,12 +194,28 @@ class BenchmarkReporter:
 
             for t in suite.test_results:
                 lines.append(f"##### `{t.test_id}` : {t.test_name}")
-                lines.append(f"- **Assertions Vérifiées** :")
-                for ass in t.assertions:
-                    check_icon = "✔️" if ass.passed else "❌"
-                    lines.append(f"  - {check_icon} **{ass.name}** (Score: {ass.score*100:.0f}%) : _{ass.details}_")
                 if t.error:
-                    lines.append(f"  - 🚨 **Erreur d'exécution** : `{t.error}`")
+                    lines.append(f"- 🚨 **Erreur d'exécution** : `{t.error}`")
+                    engine_label = t.engine or "auto"
+                    target_label = t.endpoint or "inconnu"
+                    lines.append(f"- 🎯 **Contexte d'exécution** : Moteur `{engine_label}` | Cible `{target_label}`")
+                    if t.error_traceback:
+                        lines.append("- <details><summary>Traceback complet d'erreur</summary>\n")
+                        lines.append("```python")
+                        lines.append(t.error_traceback.strip())
+                        lines.append("```\n</details>")
+                else:
+                    lines.append(f"- **Assertions Vérifiées** :")
+                    for ass in t.assertions:
+                        check_icon = "✔️" if ass.passed else "❌"
+                        lines.append(f"  - {check_icon} **{ass.name}** (Score: {ass.score*100:.0f}%) : _{ass.details}_")
+
+                if t.messages:
+                    lines.append("- <details><summary>Prompt & Messages envoyés</summary>\n")
+                    lines.append("```json")
+                    lines.append(json.dumps(t.messages, indent=2, ensure_ascii=False))
+                    lines.append("```\n</details>")
+
                 lines.append("")
                 lines.append("```text")
                 clean_preview = t.response_text.strip()
@@ -265,6 +281,10 @@ class BenchmarkReporter:
                         "tokens_per_sec": round(t.tokens_per_sec, 2),
                         "response_text": t.response_text,
                         "error": t.error,
+                        "error_traceback": t.error_traceback,
+                        "engine": t.engine,
+                        "endpoint": t.endpoint,
+                        "messages": t.messages,
                         "assertions": [
                             {
                                 "name": a.name,
