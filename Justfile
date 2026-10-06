@@ -35,12 +35,21 @@ check-git-clean:
     @$$status = git status --porcelain; if ($$status) { Write-Error "❌ Erreur : Fichiers non commités ou non suivis détectés dans l'arbre de travail :"; git status -s; exit 1 }
     @echo "✅ Arbre Git propre (zéro fichier non suivi ou non commité)."
 
+# Compile les plugins autonomes Go s'ils sont présents
+build-plugins:
+    @mkdir -p plugins/embeddings/bin plugins/llm-runner/bin
+    @if command -v go >/dev/null 2>&1; then \
+        (cd plugins/embeddings && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/jeanne-embeddings .) && \
+        (cd plugins/llm-runner && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/jeanne-llm-runner .); \
+    fi
+
 # Contrôles locaux déterministes obligatoires avant appel au Reviewer
 pre-review:
     @echo "=== [Pre-Review] Exécution des contrôles qualité ==="
     just check-permissions
     cargo fmt --check
     cargo clippy -p jeanne-core --all-targets -- -D warnings
+    just build-plugins
     cargo test -p jeanne-core
     cd apps/desktop && npm run build
     @echo "✅ Contrôles statiques, tests et permissions validés."

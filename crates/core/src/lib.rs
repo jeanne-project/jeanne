@@ -6,12 +6,17 @@ pub mod model_discovery;
 pub mod models;
 pub mod parser;
 pub mod pii;
+pub mod plugins;
 pub mod productivity;
 pub mod rag;
 pub mod storage;
 pub mod vault;
 pub mod voice;
 
+pub use plugins::{
+    JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, PluginCapability,
+    PluginError, PluginLifecycle, PluginManager, PluginManifest, execute_json_rpc,
+};
 pub use voice::{
     AudioDevice, AudioDevicesReport, AudioResampler, PiperTtsEngine, SentenceSplitter, SttEngine,
     TtsEngine, VadConfig, VadDecision, VoiceActivityDetector, VoiceError, VoicePipeline,

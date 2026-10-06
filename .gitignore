@@ -38,3 +38,6 @@ tools/llm-benchmark/.venv*/
 tools/llm-benchmark/reports/
 tools/llm-benchmark/config.json
 
+# Plugins Binaries
+plugins/**/bin/
+
