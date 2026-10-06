@@ -1,7 +1,7 @@
 # Plugin : Local LLM Inference Runner (`llm-runner`)
 
 ## 1. Contexte & Rôle Métier
-Ce plugin assure l'inférence neuronale locale de **modèles de langage 3B quantifiés** au format GGUF (`Qwen2.5-3B-Instruct`, `Llama-3.2-3B`, etc.). Il permet à l'application Jeanne d'exécuter des requêtes de synthèse, réécriture, correction orthographique, traduction et extraction d'informations de manière 100% souveraine et hors-ligne, sans dépendre d'une connexion Internet.
+Ce plugin assure l'inférence neuronale locale de **modèles de langage 2B/3B quantifiés** au format GGUF (`Qwen3.5-2B-Q4_K_M.gguf`, `Llama-3.2-3B`, etc.). Il permet à l'application Jeanne d'exécuter des requêtes de synthèse, réécriture, correction orthographique, traduction et extraction d'informations de manière 100% souveraine et hors-ligne, sans dépendre d'une connexion Internet.
 
 Conformément à l'invariant architectural de Jeanne, ce plugin tourne dans un **sous-processus dédié** afin de protéger le processus central contre tout plantage mémoire ou instabilité du pilote graphique.
 
@@ -26,7 +26,7 @@ Conformément à l'invariant architectural de Jeanne, ce plugin tourne dans un *
   "jsonrpc": "2.0",
   "method": "load_model",
   "params": {
-    "model_path": "/chemin/vers/qwen2.5-3b-instruct-q4_k_m.gguf",
+    "model_path": "/chemin/vers/Qwen3.5-2B-Q4_K_M.gguf",
     "use_gpu": true,
     "gpu_layers": 99,
     "context_size": 4096,
@@ -42,7 +42,7 @@ Conformément à l'invariant architectural de Jeanne, ce plugin tourne dans un *
   "jsonrpc": "2.0",
   "result": {
     "status": "loaded",
-    "model_name": "qwen2.5-3b-instruct-q4_k_m.gguf",
+    "model_name": "Qwen3.5-2B-Q4_K_M.gguf",
     "architecture": "qwen2",
     "context_size": 4096,
     "vram_allocated_mb": 1850,

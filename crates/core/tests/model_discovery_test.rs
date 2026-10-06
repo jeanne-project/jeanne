@@ -169,3 +169,53 @@ async fn test_04c_06_load_local_engine_with_discovered_model() {
     engine.unload_model().await.unwrap();
     assert!(!engine.is_model_loaded().await);
 }
+
+#[test]
+fn test_04e_01_resolve_model_path_prioritizes_qwen35_2b() {
+    let temp_dir = tempdir().expect("tempdir");
+    let model_25 = temp_dir.path().join("qwen2.5-3b-instruct-q4_k_m.gguf");
+    let model_35 = temp_dir.path().join("Qwen3.5-2B-Q4_K_M.gguf");
+    create_mock_gguf_file(&model_25, 2048);
+    create_mock_gguf_file(&model_35, 1024);
+
+    let resolved = resolve_model_path_in_dirs(None, &[temp_dir.path().to_path_buf()]);
+    assert!(resolved.is_some());
+    assert_eq!(
+        resolved.unwrap(),
+        model_35,
+        "Qwen3.5-2B doit être priorisé par rapport à Qwen2.5-3B"
+    );
+}
+
+#[test]
+fn test_04e_02_resolve_model_path_fallback_qwen25_compat() {
+    let temp_dir = tempdir().expect("tempdir");
+    let model_25 = temp_dir.path().join("qwen2.5-3b-instruct-q4_k_m.gguf");
+    create_mock_gguf_file(&model_25, 2048);
+
+    let resolved = resolve_model_path_in_dirs(None, &[temp_dir.path().to_path_buf()]);
+    assert!(resolved.is_some());
+    assert_eq!(
+        resolved.unwrap(),
+        model_25,
+        "En l'absence de 2B, Qwen2.5-3B doit être sélectionné en repli rétrocompatible"
+    );
+}
+
+#[test]
+fn test_04e_03_discover_models_orders_qwen2b_first() {
+    let temp_dir = tempdir().expect("tempdir");
+    let llama = temp_dir.path().join("Llama-3.2-3B-Instruct.gguf");
+    let qwen25 = temp_dir.path().join("qwen2.5-3b-instruct-q4_k_m.gguf");
+    let qwen35 = temp_dir.path().join("Qwen3.5-2B-Q4_K_M.gguf");
+    create_mock_gguf_file(&llama, 2048);
+    create_mock_gguf_file(&qwen25, 2048);
+    create_mock_gguf_file(&qwen35, 1024);
+
+    let models = discover_models_in_dirs(&[temp_dir.path().to_path_buf()], None);
+    assert_eq!(models.len(), 3);
+    assert_eq!(
+        models[0].name, "Qwen3.5-2B-Q4_K_M.gguf",
+        "Qwen3.5-2B doit être placé en première position dans la liste découverte"
+    );
+}

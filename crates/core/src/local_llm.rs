@@ -92,6 +92,10 @@ pub struct LocalEngineConfig {
     pub allow_extended_context: bool,
     #[serde(default)]
     pub daemon_endpoint: Option<String>,
+    #[serde(default)]
+    pub daemon_api_key: Option<String>,
+    #[serde(default)]
+    pub daemon_model: Option<String>,
     pub expected_sha256: Option<String>,
 }
 
@@ -111,6 +115,8 @@ impl Default for LocalEngineConfig {
             top_k: Some(20),
             allow_extended_context: false,
             daemon_endpoint: None,
+            daemon_api_key: None,
+            daemon_model: None,
             expected_sha256: None,
         }
     }
@@ -232,6 +238,84 @@ impl LocalLlmEngine {
         state.is_some()
     }
 
+    /// Indique si le moteur est prêt pour l'inférence :
+    /// - Soit un modèle local GGUF est chargé en mémoire vive
+    /// - Soit un serveur d'inférence personnalisé (daemon_endpoint) est configuré
+    pub async fn is_inference_ready(&self) -> bool {
+        if self.is_model_loaded().await {
+            return true;
+        }
+        let cfg = self.config.lock().await;
+        if let Some(endpoint) = &cfg.daemon_endpoint {
+            !endpoint.trim().is_empty()
+        } else {
+            false
+        }
+    }
+
+    /// Récupère la liste des modèles disponibles sur un serveur d'inférence OpenAI-compatible distant.
+    pub async fn fetch_remote_models(
+        endpoint: &str,
+        api_key: Option<&str>,
+    ) -> Result<Vec<String>, LlmError> {
+        let trimmed_endpoint = endpoint.trim().trim_end_matches('/');
+        let url = if trimmed_endpoint.ends_with("/models") {
+            trimmed_endpoint.to_string()
+        } else {
+            format!("{trimmed_endpoint}/models")
+        };
+
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_millis(1500))
+            .timeout(Duration::from_millis(3000))
+            .build()
+            .map_err(LlmError::Network)?;
+
+        let mut req = client.get(&url);
+        if let Some(key) = api_key {
+            let trimmed_key = key.trim();
+            if !trimmed_key.is_empty() {
+                req = req.bearer_auth(trimmed_key);
+            }
+        }
+
+        let resp = req.send().await.map_err(LlmError::Network)?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err(LlmError::Auth);
+        }
+        if !status.is_success() {
+            let status_code = status.as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(LlmError::Api {
+                status: status_code,
+                message: body,
+            });
+        }
+
+        let val: serde_json::Value = resp.json().await.map_err(LlmError::Network)?;
+        let mut model_ids = Vec::new();
+
+        // 1. Standard OpenAI format: {"data": [{"id": "..."}, ...]}
+        if let Some(arr) = val.get("data").and_then(|d| d.as_array()) {
+            for item in arr {
+                if let Some(id) = item.get("id").and_then(|i| i.as_str()) {
+                    model_ids.push(id.to_string());
+                }
+            }
+        }
+        // 2. Ollama direct format: {"models": [{"name": "..."}, ...]}
+        else if let Some(arr) = val.get("models").and_then(|m| m.as_array()) {
+            for item in arr {
+                if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+                    model_ids.push(name.to_string());
+                }
+            }
+        }
+
+        Ok(model_ids)
+    }
+
     /// Retourne le chemin complet du modèle actuellement chargé, s'il y en a un.
     pub async fn loaded_model_path(&self) -> Option<String> {
         let state = self.state.lock().await;
@@ -259,7 +343,7 @@ impl LocalLlmEngine {
         }
         .unwrap_or_else(|| {
             let dir = resolve_default_model_dir();
-            let default_path = dir.join("qwen2.5-3b-instruct-q4_k_m.gguf");
+            let default_path = dir.join("Qwen3.5-2B-Q4_K_M.gguf");
             tracing::warn!(
                 "[LocalLLM] [REPLI] Modèle non trouvé via la découverte, repli sur le chemin par défaut : {}",
                 default_path.display()
@@ -382,10 +466,18 @@ impl LocalLlmEngine {
         prompt: String,
         cancellation: CancellationToken,
     ) -> Result<mpsc::Receiver<String>, LlmError> {
-        // 1. Vérification que le modèle est chargé
-        if !self.is_model_loaded().await {
+        let is_local_loaded = self.is_model_loaded().await;
+        let current_config = self.get_config().await;
+        let has_daemon = current_config
+            .daemon_endpoint
+            .as_ref()
+            .map(|e| !e.trim().is_empty())
+            .unwrap_or(false);
+
+        // 1. Vérification que l'inférence est prête (modèle GGUF en mémoire OU daemon_endpoint configuré)
+        if !is_local_loaded && !has_daemon {
             return Err(LlmError::ModelNotLoaded(
-                "Local model is not loaded. Call load_model() first.".to_string(),
+                "Local model is not loaded and no custom inference server is configured. Call load_model() or configure daemon_endpoint.".to_string(),
             ));
         }
 
@@ -400,7 +492,6 @@ impl LocalLlmEngine {
             }
         };
 
-        let current_config = self.get_config().await;
         let timeout_secs = current_config.generation_timeout_secs.max(1);
         let timeout_duration = Duration::from_secs(timeout_secs);
 
@@ -441,6 +532,19 @@ impl LocalLlmEngine {
 
             // 2. Repli sur le moteur linguistique et sémantique embarqué (modèle GGUF chargé en RAM)
             if !streamed_via_daemon {
+                if !is_local_loaded {
+                    tracing::error!(
+                        "[LocalLLM] Échec d'inférence : le serveur personnalisé n'a pas répondu et aucun modèle local GGUF n'est chargé en mémoire."
+                    );
+                    let _ = tx
+                        .send(
+                            "❌ [Erreur Inférence] Le serveur d'inférence personnalisé n'a pas répondu et aucun modèle GGUF local n'est chargé en mémoire vive."
+                                .to_string(),
+                        )
+                        .await;
+                    return;
+                }
+
                 tracing::warn!(
                     "[LocalLLM] [REPLI] Inférence exécutée via le moteur heuristique de repli embarqué (synthèse interne)."
                 );
@@ -545,9 +649,9 @@ impl LlmProvider for LocalLlmEngine {
         let models = crate::model_discovery::discover_models(None);
         if models.is_empty() {
             tracing::info!(
-                "[LocalLLM] [REPLI] Aucun modèle GGUF physique découvert sur disque, repli sur le modèle recommandé par défaut ('Qwen2.5-3B-Instruct-Q4_K_M.gguf')."
+                "[LocalLLM] [REPLI] Aucun modèle GGUF physique découvert sur disque, repli sur le modèle recommandé par défaut ('Qwen3.5-2B-Q4_K_M.gguf')."
             );
-            Ok(vec!["Qwen2.5-3B-Instruct-Q4_K_M.gguf".to_string()])
+            Ok(vec!["Qwen3.5-2B-Q4_K_M.gguf".to_string()])
         } else {
             Ok(models.into_iter().map(|m| m.name).collect())
         }
@@ -999,6 +1103,7 @@ async fn detect_daemon_model_name(
     client: &reqwest::Client,
     base_url: &str,
     preferred: Option<&str>,
+    api_key: Option<&str>,
 ) -> String {
     if let Some(pref) = preferred {
         let trimmed = pref.trim();
@@ -1008,7 +1113,15 @@ async fn detect_daemon_model_name(
     }
 
     let models_url = format!("{base_url}/models");
-    if let Ok(resp) = client.get(&models_url).send().await {
+    let mut req = client.get(&models_url);
+    if let Some(key) = api_key {
+        let trimmed_key = key.trim();
+        if !trimmed_key.is_empty() {
+            req = req.bearer_auth(trimmed_key);
+        }
+    }
+
+    if let Ok(resp) = req.send().await {
         if resp.status().is_success() {
             if let Ok(json) = resp.json::<serde_json::Value>().await {
                 if let Some(arr) = json.get("data").and_then(|d| d.as_array()) {
@@ -1029,11 +1142,29 @@ async fn detect_daemon_model_name(
                     if let Some(first) = model_ids.first() {
                         return first.clone();
                     }
+                } else if let Some(arr) = json.get("models").and_then(|m| m.as_array()) {
+                    let model_ids: Vec<String> = arr
+                        .iter()
+                        .filter_map(|m| {
+                            m.get("name")
+                                .and_then(|name| name.as_str())
+                                .map(ToString::to_string)
+                        })
+                        .collect();
+                    if let Some(qwen) = model_ids
+                        .iter()
+                        .find(|id| id.to_lowercase().contains("qwen"))
+                    {
+                        return qwen.clone();
+                    }
+                    if let Some(first) = model_ids.first() {
+                        return first.clone();
+                    }
                 }
             }
         }
     }
-    "qwen2.5:3b".to_string()
+    "qwen3.5:2b".to_string()
 }
 
 async fn try_stream_from_local_daemon(
@@ -1045,19 +1176,33 @@ async fn try_stream_from_local_daemon(
     timeout_duration: Duration,
 ) -> Option<usize> {
     let mut endpoints: Vec<String> = Vec::new();
-    if let Some(custom) = &config.daemon_endpoint {
+    let has_custom = if let Some(custom) = &config.daemon_endpoint {
         let trimmed = custom.trim();
         if !trimmed.is_empty() {
             endpoints.push(trimmed.trim_end_matches('/').to_string());
+            true
+        } else {
+            false
         }
+    } else {
+        false
+    };
+
+    if !has_custom {
+        endpoints.push("http://127.0.0.1:11434/v1".to_string()); // Ollama
+        endpoints.push("http://127.0.0.1:8080/v1".to_string()); // llama-server
+        endpoints.push("http://127.0.0.1:1234/v1".to_string()); // LM Studio
     }
-    endpoints.push("http://127.0.0.1:11434/v1".to_string()); // Ollama
-    endpoints.push("http://127.0.0.1:8080/v1".to_string()); // llama-server
-    endpoints.push("http://127.0.0.1:1234/v1".to_string()); // LM Studio
+
+    let probe_timeout = if has_custom {
+        Duration::from_millis(1500)
+    } else {
+        Duration::from_millis(300)
+    };
 
     let probe_client = match reqwest::Client::builder()
-        .connect_timeout(Duration::from_millis(150))
-        .timeout(Duration::from_millis(300))
+        .connect_timeout(Duration::from_millis(500))
+        .timeout(probe_timeout)
         .build()
     {
         Ok(c) => c,
@@ -1065,7 +1210,7 @@ async fn try_stream_from_local_daemon(
     };
 
     let client = match reqwest::Client::builder()
-        .connect_timeout(Duration::from_millis(250))
+        .connect_timeout(Duration::from_millis(1000))
         .timeout(timeout_duration)
         .build()
     {
@@ -1084,10 +1229,20 @@ async fn try_stream_from_local_daemon(
             return None;
         }
 
-        // Sonde rapide (<300 ms) pour vérifier si le serveur local écoute
+        // Sonde rapide pour vérifier si le serveur d'inférence répond
         let models_url = format!("{base_url}/models");
-        let is_alive = match probe_client.get(&models_url).send().await {
-            Ok(_) => true,
+        let mut probe_req = probe_client.get(&models_url);
+        if let Some(key) = &config.daemon_api_key {
+            let trimmed_key = key.trim();
+            if !trimmed_key.is_empty() {
+                probe_req = probe_req.bearer_auth(trimmed_key);
+            }
+        }
+
+        let is_alive = match probe_req.send().await {
+            Ok(resp) => {
+                resp.status().is_success() || resp.status() == reqwest::StatusCode::UNAUTHORIZED
+            }
             Err(err) => {
                 tracing::debug!(
                     "[LocalLLM] Sonde endpoint daemon {} inaccessible ou inactif : {:?}",
@@ -1102,11 +1257,19 @@ async fn try_stream_from_local_daemon(
             continue;
         }
 
-        let preferred_model = config
-            .model_path
-            .as_deref()
-            .and_then(|p| Path::new(p).file_stem().and_then(|s| s.to_str()));
-        let model_name = detect_daemon_model_name(&client, base_url, preferred_model).await;
+        let preferred_model = config.daemon_model.as_deref().or_else(|| {
+            config
+                .model_path
+                .as_deref()
+                .and_then(|p| Path::new(p).file_stem().and_then(|s| s.to_str()))
+        });
+        let model_name = detect_daemon_model_name(
+            &client,
+            base_url,
+            preferred_model,
+            config.daemon_api_key.as_deref(),
+        )
+        .await;
 
         let url = format!("{base_url}/chat/completions");
         let mut payload = serde_json::json!({
@@ -1136,7 +1299,15 @@ async fn try_stream_from_local_daemon(
             }
         }
 
-        if let Ok(resp) = client.post(&url).json(&payload).send().await {
+        let mut req_builder = client.post(&url).json(&payload);
+        if let Some(key) = &config.daemon_api_key {
+            let trimmed_key = key.trim();
+            if !trimmed_key.is_empty() {
+                req_builder = req_builder.bearer_auth(trimmed_key);
+            }
+        }
+
+        if let Ok(resp) = req_builder.send().await {
             if resp.status().is_success() {
                 tracing::info!(
                     "[LocalLLM] Serveur d'inférence neuronal actif détecté sur {} ! GPU offload: {} couches. Diffusion des jetons réels...",
@@ -2389,7 +2560,7 @@ pub fn synthesize_local_response(prompt: &str) -> Vec<String> {
     // 6. Cas par défaut : réponse basée sur le prompt
     let clean_prompt = trimmed.lines().next().unwrap_or(trimmed);
     let default_ans = format!(
-        "Jeanne a traité votre requête : « {} ». Modèle local Qwen 3B actif.",
+        "Jeanne a traité votre requête : « {} ». Modèle local Qwen 3.5 2B actif.",
         clean_prompt.chars().take(80).collect::<String>()
     );
     tokenize_words(&default_ans)

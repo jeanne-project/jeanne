@@ -401,7 +401,7 @@ async fn test_04_12_llm_provider_trait_integration() {
     // Test fetch_models
     let models = engine.fetch_models().await.expect("Fetch models");
     assert!(!models.is_empty());
-    assert!(models[0].contains("Qwen2.5-3B"));
+    assert!(models[0].contains("Qwen3.5-2B"));
 
     // Test chat_stream
     let cancel = CancellationToken::new();

@@ -15,7 +15,7 @@
   "capabilities": [
     {
       "type": "llm_runner",
-      "default_model": "qwen2.5-3b-instruct-q4_k_m.gguf",
+      "default_model": "Qwen3.5-2B-Q4_K_M.gguf",
       "supported_formats": [".gguf"],
       "supported_architectures": ["qwen2", "llama", "mistral", "phi3", "gemma2"],
       "max_context_size": 4096,

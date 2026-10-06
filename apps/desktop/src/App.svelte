@@ -42,9 +42,21 @@
     max_tokens: 1024,
     allow_extended_context: false,
     daemon_endpoint: null,
+    daemon_api_key: null,
+    daemon_model: null,
   });
   let configSavedMessage = $state('');
   let isSavingConfig = $state(false);
+
+  // Serveur d'Inférence Personnalisé & Découverte Modèles
+  let remoteModelsList = $state<string[]>([]);
+  let isFetchingRemoteModels = $state(false);
+  let remoteModelsFetchMessage = $state('');
+  let remoteModelsFetchError = $state('');
+  let showApiKey = $state(false);
+  const isCustomServerConfigured = $derived(
+    Boolean(engineConfig.daemon_endpoint && engineConfig.daemon_endpoint.trim() !== '')
+  );
 
   // Modals Aide & Setup
   let showHelpModal = $state(false);
@@ -195,8 +207,48 @@
     try {
       const cfg = await invoke<LocalEngineConfig>('get_local_engine_config');
       engineConfig = cfg;
+      if (cfg.daemon_model && remoteModelsList.length === 0) {
+        remoteModelsList = [cfg.daemon_model];
+      }
     } catch (e) {
       console.error('Erreur chargement config moteur', e);
+    }
+  }
+
+  async function handleFetchRemoteModels() {
+    if (!engineConfig.daemon_endpoint || !engineConfig.daemon_endpoint.trim()) {
+      remoteModelsFetchError = "Veuillez renseigner l'URL du serveur d'inférence (ex: http://127.0.0.1:11434/v1).";
+      return;
+    }
+    isFetchingRemoteModels = true;
+    remoteModelsFetchMessage = '';
+    remoteModelsFetchError = '';
+    try {
+      const models = await invoke<string[]>('fetch_remote_server_models', {
+        endpoint: engineConfig.daemon_endpoint.trim(),
+        apiKey:
+          engineConfig.daemon_api_key && engineConfig.daemon_api_key.trim() !== ''
+            ? engineConfig.daemon_api_key.trim()
+            : null,
+      });
+      remoteModelsList = models;
+      if (models.length > 0) {
+        if (!engineConfig.daemon_model || !models.includes(engineConfig.daemon_model)) {
+          engineConfig.daemon_model = models[0];
+        }
+        remoteModelsFetchMessage = `✓ ${models.length} modèle(s) détecté(s) sur le serveur !`;
+        await saveEngineConfig();
+      } else {
+        remoteModelsFetchMessage = 'Serveur accessible, mais aucun modèle retourné dans la liste.';
+      }
+      setTimeout(() => {
+        remoteModelsFetchMessage = '';
+      }, 5000);
+    } catch (e) {
+      console.error('Erreur récupération modèles distants:', e);
+      remoteModelsFetchError = `Erreur : ${String(e)}`;
+    } finally {
+      isFetchingRemoteModels = false;
     }
   }
 
@@ -238,6 +290,14 @@
           engineConfig.daemon_endpoint && engineConfig.daemon_endpoint.trim() !== ''
             ? engineConfig.daemon_endpoint.trim()
             : null,
+        daemon_api_key:
+          engineConfig.daemon_api_key && engineConfig.daemon_api_key.trim() !== ''
+            ? engineConfig.daemon_api_key.trim()
+            : null,
+        daemon_model:
+          engineConfig.daemon_model && engineConfig.daemon_model.trim() !== ''
+            ? engineConfig.daemon_model.trim()
+            : null,
       };
       const updated = await invoke<LocalEngineConfig>('update_local_engine_config', { config: payload });
       engineConfig = updated;
@@ -269,6 +329,8 @@
       max_tokens: 1024,
       allow_extended_context: false,
       daemon_endpoint: null,
+      daemon_api_key: null,
+      daemon_model: null,
       expected_sha256: null,
     };
     saveEngineConfig();
@@ -495,16 +557,30 @@
         </div>
       </section>
 
-      <!-- Moteur d'Inférence Local (GGUF / Vulkan) -->
-      <section class="model-section" aria-label="Moteur d'inférence local">
+      <!-- Moteur d'Inférence Local (GGUF / Vulkan) ou Serveur Personnalisé -->
+      <section class="model-section" aria-label="Moteur d'inférence">
         <div class="model-header">
-          <h2 class="section-title">Inférence Locale (Vulkan / GGUF)</h2>
-          <span class="status-badge {hardwareInfo?.recommended_model_loaded ? 'status-active' : 'status-idle'}">
-            {hardwareInfo?.recommended_model_loaded ? (loadedModel ? `Modèle Actif : ${loadedModel.name}` : 'Modèle Chargé (3B)') : 'Modèle Déchargé'}
+          <h2 class="section-title">
+            {#if isCustomServerConfigured}
+              Serveur d'Inférence Personnalisé
+            {:else}
+              Inférence Locale (Vulkan / GGUF)
+            {/if}
+          </h2>
+          <span class="status-badge {hardwareInfo?.recommended_model_loaded || isCustomServerConfigured ? 'status-active' : 'status-idle'}">
+            {#if isCustomServerConfigured}
+              Serveur Actif : {engineConfig.daemon_model || 'Modèle distant'}
+            {:else if hardwareInfo?.recommended_model_loaded}
+              {loadedModel ? `Modèle Actif : ${loadedModel.name}` : 'Modèle Chargé (3B)'}
+            {:else}
+              Modèle Déchargé
+            {/if}
           </span>
         </div>
         <p class="model-description">
-          {#if loadedModel}
+          {#if isCustomServerConfigured}
+            Inférence active via <code>{engineConfig.daemon_endpoint}</code> (modèle : <strong>{engineConfig.daemon_model || 'Par défaut'}</strong>). Empreinte RAM minimale (&lt; 150 Mo).
+          {:else if loadedModel}
             Modèle en cours d'exécution : <strong>{loadedModel.name}</strong> ({loadedModel.size_formatted}{loadedModel.architecture ? `, ${loadedModel.architecture}` : ''}). Exécution 100% hors-ligne.
           {:else}
             Exécution souveraine 100% hors-ligne. Détecte automatiquement vos modèles dans <code>models/</code>.
@@ -536,6 +612,8 @@
               <span>Opération en cours...</span>
             {:else if hardwareInfo?.recommended_model_loaded}
               <span>Décharger le Modèle (&lt; 200 Mo RAM)</span>
+            {:else if isCustomServerConfigured}
+              <span>Charger un Modèle Local (Optionnel)</span>
             {:else}
               <span>Charger le Modèle Local</span>
             {/if}
@@ -643,16 +721,16 @@
         {/if}
 
         <h3 class="setup-step-title">Étape 1 — Télécharger le modèle</h3>
-        <p class="setup-text">Téléchargez le fichier <code>Qwen2.5-3B-Instruct-Q4_K_M.gguf</code> (~2.1 Go) depuis Hugging Face :</p>
+        <p class="setup-text">Téléchargez le fichier <code>Qwen3.5-2B-Q4_K_M.gguf</code> (~1.28 Go) depuis Hugging Face :</p>
         <a
           class="download-link"
-          href="https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
+          href="https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf"
           target="_blank"
           rel="noopener noreferrer"
         >
-          🤗 Hugging Face — Qwen2.5-3B-Instruct-Q4_K_M.gguf
+          🤗 Hugging Face — Qwen3.5-2B-Q4_K_M.gguf
         </a>
-        <p class="setup-hint">Connectez-vous sur Hugging Face si demandé. Téléchargement direct (~2.1 Go).</p>
+        <p class="setup-hint">Connectez-vous sur Hugging Face si demandé. Téléchargement direct (~1.28 Go).</p>
 
         <h3 class="setup-step-title">Étape 2 — Placer le fichier</h3>
         <p class="setup-text">Déposez le fichier <strong>sans renommer</strong> dans le répertoire suivant :</p>
@@ -665,14 +743,14 @@
         <p class="setup-hint">Créez le dossier <code>models/</code> s'il n'existe pas encore.</p>
 
         <h3 class="setup-step-title">Étape 3 — Charger dans Jeanne</h3>
-        <p class="setup-text">Cliquez sur <strong>« Charger le Modèle Local (Qwen 3B) »</strong> dans le tableau de bord. Le chargement prend quelques secondes (~2.1 Go en mémoire).</p>
+        <p class="setup-text">Cliquez sur <strong>« Charger le Modèle Local (Qwen 3.5 2B) »</strong> dans le tableau de bord. Le chargement prend quelques secondes (~1.3 Go en mémoire).</p>
 
         <div class="setup-requirements">
           <strong>⚙️ Configuration recommandée :</strong>
           <ul>
             <li>RAM : 8 Go disponibles minimum (16 Go total recommandé)</li>
             <li>GPU : Vulkan compatible (Intel Iris Xe, AMD Radeon, NVIDIA GeForce)</li>
-            <li>Espace disque : ~2.2 Go pour le fichier GGUF</li>
+            <li>Espace disque : ~1.3 Go pour le fichier GGUF</li>
           </ul>
         </div>
       </div>
@@ -745,13 +823,13 @@
               <div class="recommended-downloads">
                 <a
                   class="model-download-card"
-                  href="https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
+                  href="https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   <div class="dl-info">
-                    <span class="dl-title">Qwen2.5-3B-Instruct (Q4_K_M) — Recommandé</span>
-                    <span class="dl-desc">Frugal, rapide (~25-30 tok/s), optimisé pour PC 16 Go avec iGPU (~2.1 Go)</span>
+                    <span class="dl-title">Qwen3.5-2B (Q4_K_M) — Recommandé</span>
+                    <span class="dl-desc">Ultra-frugal, rapide et précis, optimisé pour PC &le; 16 Go avec iGPU (~1.28 Go)</span>
                   </div>
                   <span class="dl-action">🤗 Télécharger</span>
                 </a>
@@ -1014,7 +1092,7 @@
                     <option value={4096}>4096 jetons (Standard, recommandé &le; 16 Go)</option>
                     <option value={8192}>8192 jetons (PC &ge; 24 Go RAM / Contexte étendu)</option>
                     <option value={16384}>16384 jetons (PC &ge; 32 Go RAM / Contexte large)</option>
-                    <option value={32768}>32768 jetons (PC puissant / Contexte natif Qwen2.5)</option>
+                    <option value={32768}>32768 jetons (PC puissant / Contexte natif Qwen3.5)</option>
                   </select>
                   <span class="adv-hint">
                     {#if engineConfig.allow_extended_context || (hardwareInfo && hardwareInfo.total_system_ram_mb > 16384)}
@@ -1094,20 +1172,109 @@
                     <span>🚀 Débloquer grand contexte (&gt; 4096 jetons) pour PC puissant (&gt; 16 Go RAM / GPU)</span>
                   </label>
                   <span class="adv-hint">
-                    Permet d'utiliser des contextes jusqu'à 32768 tokens (Qwen2.5, etc.) pour traiter de longs documents. Attention : un contexte de 32K peut allouer 4 à 8 Go de mémoire supplémentaire pour la table KV d'attention.
+                    Permet d'utiliser des contextes jusqu'à 32768 tokens (Qwen3.5, etc.) pour traiter de longs documents. Attention : un contexte de 32K peut allouer 4 à 8 Go de mémoire supplémentaire pour la table KV d'attention.
                   </span>
                 </div>
 
-                <div class="advanced-field advanced-field-full">
-                  <label for="adv-daemon" class="adv-label">Serveur d'inférence local personnalisé (daemon_endpoint)</label>
-                  <input
-                    id="adv-daemon"
-                    type="text"
-                    placeholder="ex: http://127.0.0.1:11434/v1 (Ollama) ou http://127.0.0.1:8080/v1"
-                    bind:value={engineConfig.daemon_endpoint}
-                    class="adv-input"
-                  />
-                  <span class="adv-hint">Optionnel : Si vous utilisez déjà Ollama, LM Studio ou llama-server sur votre machine.</span>
+                <!-- Configuration Complète Serveur d'Inférence Personnalisé -->
+                <div class="custom-server-block advanced-field-full">
+                  <div class="custom-server-header">
+                    <span class="custom-server-title">🌐 Serveur d'Inférence Personnalisé (Ollama, LM Studio, vLLM, API OpenAI)</span>
+                    <span class="badge-count {isCustomServerConfigured ? 'badge-count-active' : ''}">
+                      {isCustomServerConfigured ? '🟢 Serveur Actif' : 'Non configuré'}
+                    </span>
+                  </div>
+                  <p class="adv-hint">
+                    Délègue l'inférence à votre serveur local ou distant. 
+                    <strong>Si configuré, le chargement d'un modèle GGUF local n'est plus obligatoire</strong> (empreinte RAM &lt; 150 Mo).
+                  </p>
+
+                  <div class="custom-server-inputs-grid">
+                    <div class="advanced-field">
+                      <label for="adv-daemon" class="adv-label">URL du Serveur d'Inférence (daemon_endpoint)</label>
+                      <input
+                        id="adv-daemon"
+                        type="text"
+                        placeholder="ex: http://127.0.0.1:11434/v1 (Ollama) ou http://127.0.0.1:8080/v1"
+                        bind:value={engineConfig.daemon_endpoint}
+                        onchange={saveEngineConfig}
+                        class="adv-input"
+                      />
+                    </div>
+
+                    <div class="advanced-field">
+                      <div class="key-label-row">
+                        <label for="adv-daemon-key" class="adv-label">Clé d'API (daemon_api_key)</label>
+                        <button
+                          type="button"
+                          class="key-toggle-btn"
+                          onclick={() => (showApiKey = !showApiKey)}
+                        >
+                          {showApiKey ? '🙈 Masquer' : '👁️ Afficher'}
+                        </button>
+                      </div>
+                      <input
+                        id="adv-daemon-key"
+                        type={showApiKey ? 'text' : 'password'}
+                        placeholder="Optionnel (Bearer token / clé secrète)"
+                        bind:value={engineConfig.daemon_api_key}
+                        onchange={saveEngineConfig}
+                        class="adv-input"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="custom-server-fetch-row">
+                    <button
+                      type="button"
+                      class="btn-sm btn-secondary"
+                      onclick={handleFetchRemoteModels}
+                      disabled={isFetchingRemoteModels || !engineConfig.daemon_endpoint}
+                    >
+                      {#if isFetchingRemoteModels}
+                        <span class="spinner-sm"></span> Interrogation du serveur...
+                      {:else}
+                        🔄 Récupérer les modèles disponibles sur le serveur
+                      {/if}
+                    </button>
+
+                    {#if remoteModelsFetchMessage}
+                      <span class="fetch-notice fetch-success">{remoteModelsFetchMessage}</span>
+                    {/if}
+                    {#if remoteModelsFetchError}
+                      <span class="fetch-notice fetch-error">{remoteModelsFetchError}</span>
+                    {/if}
+                  </div>
+
+                  {#if remoteModelsList.length > 0}
+                    <div class="advanced-field" style="margin-top: 10px;">
+                      <label for="adv-daemon-model" class="adv-label">Modèle sélectionné sur le serveur</label>
+                      <select
+                        id="adv-daemon-model"
+                        bind:value={engineConfig.daemon_model}
+                        onchange={saveEngineConfig}
+                        class="adv-select"
+                      >
+                        {#each remoteModelsList as m}
+                          <option value={m}>{m}</option>
+                        {/each}
+                      </select>
+                      <span class="adv-hint">Modèle qui sera automatiquement utilisé pour toutes les requêtes d'inférence et questions au coffre.</span>
+                    </div>
+                  {:else if isCustomServerConfigured}
+                    <div class="advanced-field" style="margin-top: 10px;">
+                      <label for="adv-daemon-model-manual" class="adv-label">Nom du modèle (saisie manuelle si /models non exposé)</label>
+                      <input
+                        id="adv-daemon-model-manual"
+                        type="text"
+                        placeholder="ex: qwen3.5:2b ou llama-3.2-3b-instruct"
+                        bind:value={engineConfig.daemon_model}
+                        onchange={saveEngineConfig}
+                        class="adv-input"
+                      />
+                      <span class="adv-hint">Indiquez l'identifiant du modèle actif sur votre serveur.</span>
+                    </div>
+                  {/if}
                 </div>
               </div>
 
@@ -1157,7 +1324,7 @@
           <div class="advice-box">
             <strong>💡 Quel modèle choisir pour votre PC ?</strong>
             <ul>
-              <li><strong>PC portable 8 Go ou 16 Go avec iGPU partagé</strong> : Privilégiez impérativement les modèles <strong>3B quantifiés en Q4_K_M</strong> (ex: <code>Qwen2.5-3B</code> ou <code>Llama-3.2-3B</code>). Ils consomment ~2.2 Go de RAM et maintiennent votre système fluide.</li>
+              <li><strong>PC portable 8 Go ou 16 Go avec iGPU partagé</strong> : Privilégiez impérativement les modèles <strong>2B/3B quantifiés en Q4_K_M</strong> (ex: <code>Qwen3.5-2B</code> ou <code>Llama-3.2-3B</code>). Ils consomment ~1.3 à 2.2 Go de RAM et maintiennent votre système fluide.</li>
               <li><strong>PC 16 Go+ avec GPU dédié ou 32 Go RAM</strong> : Vous pouvez utiliser des modèles <strong>7B</strong> ou <strong>8B</strong> (ex: <code>Qwen2.5-7B-Instruct-Q4_K_M</code>, ~4.4 Go).</li>
             </ul>
           </div>
@@ -1257,7 +1424,7 @@
           <h3 class="help-section-title">🖥️ Inférence IA Locale (100% hors-ligne)</h3>
           <p>Faites tourner un modèle IA directement sur votre machine, <strong>sans aucune connexion internet</strong> :</p>
           <ul>
-            <li>Modèle : <code>Qwen2.5-3B-Instruct-Q4_K_M.gguf</code> (~2.1 Go)</li>
+            <li>Modèle : <code>Qwen3.5-2B-Q4_K_M.gguf</code> (~1.28 Go)</li>
             <li>Accélération matérielle Vulkan (Intel/AMD/NVIDIA)</li>
             <li>Contexte plafonné à 4096 tokens pour maîtriser la RAM</li>
             <li>Compression automatique des prompts longs</li>
@@ -2807,5 +2974,76 @@
   .btn-secondary:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.12);
     color: #f0f6fc;
+  }
+
+  /* ─── Bloc Serveur d'Inférence Personnalisé ─── */
+  .custom-server-block {
+    background: rgba(99, 102, 241, 0.05);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-top: 0.5rem;
+  }
+
+  .custom-server-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .custom-server-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #e2e8f0;
+  }
+
+  .custom-server-inputs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .key-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .key-toggle-btn {
+    background: none;
+    border: none;
+    color: #818cf8;
+    font-size: 0.72rem;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .key-toggle-btn:hover {
+    text-decoration: underline;
+  }
+
+  .custom-server-fetch-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 0.25rem;
+  }
+
+  .fetch-notice {
+    font-size: 0.78rem;
+    line-height: 1.3;
+  }
+
+  .fetch-success {
+    color: #86efac;
+  }
+
+  .fetch-error {
+    color: #f87171;
   }
 </style>
