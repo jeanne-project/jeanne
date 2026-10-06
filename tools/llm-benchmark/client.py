@@ -200,40 +200,41 @@ class LlmClient:
         params: InferenceParams,
     ) -> Tuple[str, float, float, int, float]:
         """Generates realistic deterministic responses for dry-run verification."""
-        last_msg = messages[-1]["content"].lower()
+        last_msg = messages[-1]["content"].lower() if messages else ""
+        all_content = " ".join(m.get("content", "") for m in messages).lower()
         is_reasoning = any(k in self.model.lower() for k in ["r1", "qwq", "think", "reasoning"])
 
         time.sleep(0.05)
         eff_temp = params.temperature if params.temperature is not None else 0.8
         ttft_ms = 45.0 + (eff_temp * 10.0)
 
-        if "quel est le rôle de la base de données sqlite" in last_msg:
+        if "quel est le rôle de la base de données sqlite" in all_content:
             resp = (
                 "La base de données SQLite (avec sqlite-vec et fts5) n'est qu'un cache d'indexation "
                 "jetable et dérivé dans Jeanne. La source de vérité absolue et immuable reste le dossier "
                 "de fichiers Markdown locaux selon la philosophie File-over-App. [source: note_architecture_v1.md]"
             )
-        elif "satellite" in last_msg:
+        elif "satellite" in all_content:
             resp = "Information non trouvée dans les documents fournis."
-        elif "confidentialité des données et où sont stockées les clés" in last_msg:
+        elif "confidentialité des données et où sont stockées les clés" in all_content:
             resp = (
                 "Jeanne garantit la confidentialité grâce au stockage dans le trousseau sécurisé (keyring natif) "
                 "et au masquage local des données sensibles [source: specs_securite_local.md]. "
                 "De plus, les notes Markdown restent sous contrôle local selon la philosophie File-over-App [source: note_architecture_v1.md]."
             )
-        elif "[person_1]" in last_msg:
+        elif "[person_1]" in all_content:
             resp = (
                 "Bonjour [PERSON_1],\n\n"
                 "Je vous confirme notre rendez-vous du [DATE_1]. Pour toute question, vous pouvez écrire à "
                 "[EMAIL_1] ou me contacter au [PHONE_1].\n\nBien cordialement."
             )
-        elif "[client_a]" in last_msg:
+        elif "[client_a]" in all_content:
             resp = (
                 "Comparatif pour le projet [PROJECT_X] :\n"
                 "- [CLIENT_A] propose le budget [BUDGET_A] avec un délai court de 3 mois.\n"
                 "- [CLIENT_B] propose le budget [BUDGET_B] avec un délai plus long de 6 mois."
             )
-        elif "rappelle-moi urgemment de réviser les index fts5" in last_msg:
+        elif "rappelle-moi urgemment de réviser les index fts5" in all_content:
             resp = json.dumps(
                 {
                     "action": "create_task",
@@ -243,7 +244,7 @@ class LlmClient:
                 },
                 indent=2,
             )
-        elif "bm25 avec k1=1.2" in last_msg:
+        elif "bm25 avec k1=1.2" in all_content:
             resp = json.dumps(
                 {
                     "category": "Ressources",
@@ -252,7 +253,7 @@ class LlmClient:
                 },
                 indent=2,
             )
-        elif "transcription de la réunion" in last_msg:
+        elif "transcription de la réunion" in all_content:
             resp = (
                 "### Décisions\n"
                 "- Clôture de la relecture du code ce soir.\n"
@@ -261,33 +262,33 @@ class LlmClient:
                 "- [ ] @Bob: Optimiser la libération du buffer mmap d'ici vendredi 17h\n"
                 "- [ ] @Claire: Préparer le rapport d'audit du Jalon 3 pour lundi\n"
             )
-        elif "fenêtre de contexte kv" in last_msg:
+        elif "fenêtre de contexte kv" in all_content:
             resp = "La limite stricte est de 4096 tokens pour prévenir les débordements de mémoire vive (OOM)."
-        elif "bonjor, coment sa va" in last_msg:
+        elif "bonjor, coment sa va" in all_content:
             resp = "Bonjour, comment ça va ?"
-        elif "aparament sa marche pas" in last_msg:
+        elif "aparament sa marche pas" in all_content:
             resp = "Apparemment ça ne marche pas, où est le problème ?"
-        elif "reçut votre devis mes il y a des érreur" in last_msg:
+        elif "reçut votre devis mes il y a des érreur" in all_content:
             resp = "Je vous contacte car nous avons reçu votre devis mais il y a des erreurs de calcul."
-        elif "implementer une requete sqlite" in last_msg:
+        elif "implementer une requete sqlite" in all_content:
             resp = "Je suis développeur et j'ai implémenté une requête sqlite sans index fts5."
-        elif "tu peux m envoyer le doc stp c urgent on a un souci avec le client" in last_msg:
+        elif "tu peux m envoyer le doc stp c urgent on a un souci avec le client" in all_content:
             resp = "Pourriez-vous s'il vous plaît me transmettre le document dès que possible ? Nous rencontrons une urgence concernant le dossier client."
-        elif "baisse de performance au niveau de la synchronisation" in last_msg:
+        elif "baisse de performance au niveau de la synchronisation" in all_content:
             resp = "Une baisse de performance affecte la synchronisation de la base de données lors de fortes charges simultanées."
-        elif "3 puces clés concises commençant par un tiret (-)" in last_msg:
+        elif "3 puces clés concises commençant par un tiret (-)" in all_content or "le projet jeanne repose sur le paradigme file-over-app" in all_content:
             resp = (
                 "- Les fichiers Markdown constituent la source de vérité immuable locale selon la philosophie File-over-App.\n"
                 "- La base de données SQLite avec sqlite-vec et fts5 sert exclusivement de cache d'indexation jetable.\n"
                 "- L'empreinte mémoire vive applicative est plafonnée à 200 Mo avec un contexte KV limité à 4096 tokens."
             )
-        elif "traduis fidèlement le texte suivant en anglais" in last_msg:
+        elif "traduis fidèlement le texte suivant en anglais" in all_content or "sans serveur externe afin de préserver la confidentialité" in all_content:
             resp = "The local inference engine executes directly in-memory without an external server to preserve the privacy of the notes."
-        elif "traduis fidèlement le texte suivant en français" in last_msg:
+        elif "traduis fidèlement le texte suivant en français" in all_content or "floating quick-access palette" in all_content:
             resp = "La palette d'accès rapide flottante doit s'ouvrir en moins de 50 millisecondes pour préserver une expérience utilisateur fluide."
-        elif "tu es l'assistant de capture de la palette jeanne" in last_msg:
+        elif "tu es l'assistant de capture de la palette jeanne" in all_content or "auditer la consommation mémoire du pipeline audio" in all_content:
             resp = "- [ ] Auditer la consommation mémoire du pipeline audio d'ici la réunion de vendredi"
-        elif "pour ce signet web technique" in last_msg or "sqlite-vec: a vector search sqlite extension" in last_msg:
+        elif "pour ce signet web technique" in all_content or "sqlite-vec: a vector search sqlite extension" in all_content:
             resp = "Extension SQLite écrite en C pour la recherche vectorielle rapide et locale."
         else:
             resp = "Réponse simulée de test pour l'assistant Jeanne."

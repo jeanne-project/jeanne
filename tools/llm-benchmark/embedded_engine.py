@@ -120,6 +120,21 @@ class EmbeddedGgufEngine:
         self._load_duration_ms = (t_end - t0) * 1000.0
         return self._load_duration_ms
 
+    @staticmethod
+    def _normalize_messages(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Ensures messages contain at least one 'user' message for strict chat templates."""
+        if not messages:
+            return [{"role": "user", "content": ""}]
+        if any(m.get("role") == "user" for m in messages):
+            return messages
+        normalized = []
+        for i, m in enumerate(messages):
+            if i == len(messages) - 1 and m.get("role") == "system":
+                normalized.append({"role": "user", "content": m.get("content", "")})
+            else:
+                normalized.append(dict(m))
+        return normalized
+
     def generate(
         self,
         messages: List[Dict[str, str]],
@@ -131,15 +146,17 @@ class EmbeddedGgufEngine:
         """
         self.load()
 
+        norm_messages = self._normalize_messages(messages)
+
         if self._llm == "cli_fallback":
-            return self._generate_via_cli(messages, params)
+            return self._generate_via_cli(norm_messages, params)
 
         t_start = time.perf_counter()
         t_first_token: Optional[float] = None
         collected_chunks: List[str] = []
 
         completion_kwargs: Dict[str, Any] = {
-            "messages": messages,
+            "messages": norm_messages,
             "max_tokens": params.max_tokens,
             "stream": True,
         }
