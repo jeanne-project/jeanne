@@ -1271,11 +1271,19 @@ async fn try_stream_from_local_daemon(
         )
         .await;
 
+        let is_remote = is_remote_endpoint(base_url);
+        let mut session = crate::pii::PiiSession::new();
+        let final_prompt = if is_remote {
+            session.mask_text(prompt)
+        } else {
+            prompt.to_string()
+        };
+
         let url = format!("{base_url}/chat/completions");
         let mut payload = serde_json::json!({
             "model": model_name,
             "messages": [
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": final_prompt}
             ],
             "stream": true,
             "temperature": config.temperature,
@@ -1310,12 +1318,15 @@ async fn try_stream_from_local_daemon(
         if let Ok(resp) = req_builder.send().await {
             if resp.status().is_success() {
                 tracing::info!(
-                    "[LocalLLM] Serveur d'inférence neuronal actif détecté sur {} ! GPU offload: {} couches. Diffusion des jetons réels...",
+                    "[LocalLLM] Serveur d'inférence neuronal actif détecté sur {} ! GPU offload: {} couches. Diffusion des jetons réels... (mode_distant={}, masquage_pii={})",
                     base_url,
-                    num_gpu
+                    num_gpu,
+                    is_remote,
+                    is_remote
                 );
                 let mut event_stream = resp.bytes_stream().eventsource();
                 let mut token_count = 0usize;
+                let mut pii_buffer = crate::pii::PiiSlidingBuffer::new(session.reverse_map.clone());
 
                 while let Some(item) = event_stream.next().await {
                     if cancellation.is_cancelled() {
@@ -1349,10 +1360,17 @@ async fn try_stream_from_local_daemon(
                                         .and_then(|c| c.as_str())
                                     {
                                         if !content.is_empty() {
-                                            if tx.send(content.to_string()).await.is_err() {
-                                                return Some(token_count);
+                                            let demasked = if is_remote {
+                                                pii_buffer.process_chunk(content)
+                                            } else {
+                                                content.to_string()
+                                            };
+                                            if !demasked.is_empty() {
+                                                if tx.send(demasked).await.is_err() {
+                                                    return Some(token_count);
+                                                }
+                                                token_count += 1;
                                             }
-                                            token_count += 1;
                                         }
                                     }
                                 }
@@ -1360,6 +1378,14 @@ async fn try_stream_from_local_daemon(
                         }
                     }
                 }
+
+                if is_remote {
+                    let leftover = pii_buffer.flush();
+                    if !leftover.is_empty() {
+                        let _ = tx.send(leftover).await;
+                    }
+                }
+
                 if token_count > 0 {
                     return Some(token_count);
                 }
@@ -2570,4 +2596,14 @@ fn tokenize_words(text: &str) -> Vec<String> {
     text.split_inclusive([' ', '\n'])
         .map(|s| s.to_string())
         .collect()
+}
+
+/// Détermine si une URL pointe vers un endpoint distant/externe (nécessitant le masquage PII)
+/// par opposition à une adresse locale de rebouclage (127.0.0.1, localhost, 0.0.0.0, [::1]).
+pub fn is_remote_endpoint(url: &str) -> bool {
+    let lower = url.to_lowercase();
+    !(lower.contains("127.0.0.1")
+        || lower.contains("localhost")
+        || lower.contains("0.0.0.0")
+        || lower.contains("[::1]"))
 }

@@ -300,3 +300,87 @@ async fn test_04d_05_stream_uses_custom_model_and_auth() {
 
     assert_eq!(output, "Succès");
 }
+
+#[test]
+fn test_is_remote_endpoint_detection() {
+    use jeanne_core::is_remote_endpoint;
+
+    assert!(!is_remote_endpoint("http://127.0.0.1:11434/v1"));
+    assert!(!is_remote_endpoint("http://localhost:8080/v1"));
+    assert!(!is_remote_endpoint("http://0.0.0.0:1234/v1"));
+    assert!(!is_remote_endpoint("http://[::1]:8080/v1"));
+
+    assert!(is_remote_endpoint("https://api.openai.com/v1"));
+    assert!(is_remote_endpoint("http://192.168.1.100:11434/v1"));
+    assert!(is_remote_endpoint("https://llm.mycompany.internal/v1"));
+    assert!(is_remote_endpoint("http://127.0.0.2:8080/v1"));
+}
+
+#[tokio::test]
+async fn test_pii_redaction_on_remote_server() {
+    // 127.0.0.2 est une adresse de boucle locale physique sur Linux mais considérée distante par is_remote_endpoint
+    let listener = TcpListener::bind("127.0.0.2:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        // 1. Probe check on /models
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let _ = read_full_request(&mut socket).await;
+            let body = "{\"data\": [{\"id\": \"qwen2\"}]}";
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(resp.as_bytes()).await.unwrap();
+            let _ = socket.shutdown().await;
+        }
+
+        // 2. POST /chat/completions
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let req = read_full_request(&mut socket).await;
+
+            // Vérification que les informations sensibles ont été masquées
+            assert!(!req.contains("jean.dupont@example.com"));
+            assert!(req.contains("[EMAIL_1]"));
+            assert!(!req.contains("FR7630006000011234567890189"));
+            assert!(req.contains("[FINANCIAL_1]"));
+
+            // Le serveur distant renvoie les tokens fragmentés pour tester PiiSlidingBuffer
+            let sse_body = "data: {\"choices\": [{\"delta\": {\"content\": \"Voici [\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"EMAIL_\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"1] et [FINANCIAL_1]\"}}]}\n\ndata: [DONE]\n\n";
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                sse_body.len(),
+                sse_body
+            );
+            socket.write_all(resp.as_bytes()).await.unwrap();
+            let _ = socket.shutdown().await;
+        }
+    });
+
+    let config = LocalEngineConfig {
+        daemon_endpoint: Some(format!("http://127.0.0.2:{port}/v1")),
+        daemon_model: Some("qwen2".to_string()),
+        ..Default::default()
+    };
+    let engine = LocalLlmEngine::new(config);
+
+    let cancel = CancellationToken::new();
+    let prompt =
+        "Mon email est jean.dupont@example.com et mon IBAN est FR7630006000011234567890189";
+    let mut rx = engine
+        .generate_stream(prompt.to_string(), cancel)
+        .await
+        .expect("Stream execution failed");
+
+    let mut output = String::new();
+    while let Some(tok) = rx.recv().await {
+        output.push_str(&tok);
+    }
+
+    // L'email et l'IBAN doivent être reconstitués fidèlement pour l'utilisateur
+    assert_eq!(
+        output,
+        "Voici jean.dupont@example.com et FR7630006000011234567890189"
+    );
+}

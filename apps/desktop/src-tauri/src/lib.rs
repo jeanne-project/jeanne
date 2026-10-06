@@ -1,9 +1,9 @@
 use jeanne_core::{
-    AudioDevicesReport, CancellationToken, HardwareInfo, IndexedChunk, LocalEngineConfig,
-    LocalInferenceStats, LocalLlmEngine, MeetingConfig, MeetingRecorder, MeetingSession,
-    MeetingStatus, MeetingSummaryResult, NoteFrontmatter, PiperTtsEngine, SearchResult,
-    SnippetItem, StorageManager, TaskItem, VadConfig, VaultStats, VaultWatcher, VoicePipeline,
-    VoiceStatus, WhisperSttEngine, get_audio_devices,
+    AudioDevicesReport, CancellationToken, HardwareInfo, IndexedChunk, KeyringManager,
+    LocalEngineConfig, LocalInferenceStats, LocalLlmEngine, MeetingConfig, MeetingRecorder,
+    MeetingSession, MeetingStatus, MeetingSummaryResult, NoteFrontmatter, PiperTtsEngine,
+    SearchResult, SnippetItem, StorageManager, TaskItem, VadConfig, VaultStats, VaultWatcher,
+    VoicePipeline, VoiceStatus, WhisperSttEngine, get_audio_devices,
 };
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -357,12 +357,33 @@ async fn update_local_engine_config(
         config.context_size
     );
 
+    match &config.daemon_api_key {
+        Some(key) if !key.trim().is_empty() => {
+            if let Err(e) = KeyringManager::set_api_key("jeanne", "daemon_api_key", key.trim()) {
+                tracing::warn!(
+                    "Impossible d'enregistrer la clé d'API dans le trousseau système : {}",
+                    e
+                );
+            }
+        }
+        _ => {
+            if let Err(e) = KeyringManager::delete_api_key("jeanne", "daemon_api_key") {
+                tracing::debug!("Nettoyage clé trousseau : {}", e);
+            }
+        }
+    }
+
     let settings_dir = state.vault_path.join(".jeanne");
     if let Err(e) = tokio::fs::create_dir_all(&settings_dir).await {
         tracing::warn!("Impossible de créer le répertoire .jeanne : {e}");
     }
     let settings_file = settings_dir.join("local_llm_settings.json");
-    if let Ok(serialized) = serde_json::to_string_pretty(&config) {
+
+    // Sécurité stricte : la clé d'API ne doit JAMAIS résider en clair dans le coffre sur le disque
+    let mut disk_config = config.clone();
+    disk_config.daemon_api_key = None;
+
+    if let Ok(serialized) = serde_json::to_string_pretty(&disk_config) {
         if let Err(e) = tokio::fs::write(&settings_file, serialized).await {
             tracing::warn!("Impossible d'enregistrer local_llm_settings.json : {e}");
         } else {
@@ -933,8 +954,7 @@ pub fn run() {
                 );
             }
 
-            let settings_file = vault_path.join(".jeanne").join("local_llm_settings.json");
-            let initial_config = if settings_file.exists() {
+            let mut initial_config = if settings_file.exists() {
                 match std::fs::read_to_string(&settings_file) {
                     Ok(content) => {
                         match serde_json::from_str::<LocalEngineConfig>(&content) {
@@ -958,6 +978,12 @@ pub fn run() {
             } else {
                 LocalEngineConfig::default()
             };
+
+            // Récupération sécurisée de la clé d'API depuis le trousseau OS si disponible
+            if let Ok(Some(key)) = KeyringManager::get_api_key("jeanne", "daemon_api_key") {
+                tracing::info!("Clé d'API récupérée avec succès depuis le trousseau sécurisé OS.");
+                initial_config.daemon_api_key = Some(key);
+            }
 
             let local_engine = Arc::new(LocalLlmEngine::new(initial_config));
             let voice_pipeline = Arc::new(VoicePipeline::new(
@@ -1380,14 +1406,19 @@ mod tests {
         let mut updated = initial.clone();
         updated.use_gpu = false;
         updated.generation_timeout_secs = 20;
+        updated.daemon_api_key = Some("super_secret_test_key".to_string());
 
-        // Persistence in vault directory .jeanne/local_llm_settings.json
+        // Persistence in vault directory .jeanne/local_llm_settings.json with security sanitization
         let settings_dir = app_state.vault_path.join(".jeanne");
         tokio::fs::create_dir_all(&settings_dir)
             .await
             .expect("mkdir");
         let settings_file = settings_dir.join("local_llm_settings.json");
-        let serialized = serde_json::to_string_pretty(&updated).expect("serialize");
+
+        // Simule la sauvegarde sécurisée : clé omise sur disque
+        let mut disk_config = updated.clone();
+        disk_config.daemon_api_key = None;
+        let serialized = serde_json::to_string_pretty(&disk_config).expect("serialize");
         tokio::fs::write(&settings_file, serialized)
             .await
             .expect("write");
@@ -1396,6 +1427,10 @@ mod tests {
         let fetched = app_state.local_engine.get_config().await;
         assert!(!fetched.use_gpu);
         assert_eq!(fetched.generation_timeout_secs, 20);
+        assert_eq!(
+            fetched.daemon_api_key.as_deref(),
+            Some("super_secret_test_key")
+        );
 
         // Verify hardware profile reports CPU forced mode when use_gpu is false
         let mut hw = app_state.local_engine.hardware_info().clone();
@@ -1409,11 +1444,15 @@ mod tests {
             Some("Désactivé (Mode CPU forcé)")
         );
 
-        // Verify reloading from disk matches
+        // Verify reloading from disk matches and DOES NOT contain the API key in plaintext
         let disk_content = std::fs::read_to_string(&settings_file).expect("read");
         let parsed: LocalEngineConfig = serde_json::from_str(&disk_content).expect("parse");
         assert!(!parsed.use_gpu);
         assert_eq!(parsed.generation_timeout_secs, 20);
+        assert_eq!(
+            parsed.daemon_api_key, None,
+            "La clé d'API ne doit jamais être enregistrée en clair sur le disque"
+        );
     }
 
     #[tokio::test]

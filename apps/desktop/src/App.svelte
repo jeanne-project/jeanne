@@ -379,7 +379,11 @@
         } catch {
           modelSetupPath = '(chemin non disponible)';
         }
-        modelSetupError = errMsg;
+        if (isCustomServerConfigured) {
+          modelSetupError = '';
+        } else {
+          modelSetupError = errMsg;
+        }
         showModelSetupModal = true;
       } else {
         console.error('Erreur chargement modèle local', e);
@@ -713,6 +717,12 @@
         <button class="modal-close" onclick={() => { showModelSetupModal = false; }} aria-label="Fermer">✕</button>
       </div>
       <div class="modal-body">
+        {#if isCustomServerConfigured}
+          <div class="alert-box alert-info-server">
+            <strong>ℹ️ Serveur d'inférence personnalisé déjà configuré (<code>{engineConfig.daemon_endpoint}</code>).</strong><br/>
+            Ce guide de téléchargement n'est requis que si vous désirez une exécution 100% hors-ligne sans serveur.
+          </div>
+        {/if}
         {#if modelSetupError}
           <div class="alert-box">
             <strong>⚠️ Modèle introuvable</strong><br/>
@@ -815,38 +825,50 @@
           </div>
 
           {#if availableModels.length === 0}
-            <div class="empty-models-box">
-              <p><strong>⚠️ Aucun modèle <code>.gguf</code> détecté dans le dossier <code>models/</code>.</strong></p>
-              <p class="hint-muted">
-                Pour exécuter l'IA en local 100% hors-ligne, déposez un ou plusieurs fichiers <code>.gguf</code> dans le dossier ci-dessus, puis cliquez sur <strong>« Actualiser »</strong>.
-              </p>
-              <div class="recommended-downloads">
-                <a
-                  class="model-download-card"
-                  href="https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <div class="dl-info">
-                    <span class="dl-title">Qwen3.5-2B (Q4_K_M) — Recommandé</span>
-                    <span class="dl-desc">Ultra-frugal, rapide et précis, optimisé pour PC &le; 16 Go avec iGPU (~1.28 Go)</span>
-                  </div>
-                  <span class="dl-action">🤗 Télécharger</span>
-                </a>
-                <a
-                  class="model-download-card"
-                  href="https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <div class="dl-info">
-                    <span class="dl-title">Llama-3.2-3B-Instruct (Q4_K_M)</span>
-                    <span class="dl-desc">Grande polyvalence en rédaction et synthèse (~2.0 Go)</span>
-                  </div>
-                  <span class="dl-action">🤗 Télécharger</span>
-                </a>
+            {#if isCustomServerConfigured}
+              <div class="empty-models-box server-active-box">
+                <div class="server-active-icon">🟢</div>
+                <div class="server-active-details">
+                  <p class="server-active-title"><strong>Inférence assurée par le serveur personnalisé</strong></p>
+                  <p class="hint-muted">
+                    Votre serveur (<code>{engineConfig.daemon_endpoint}</code>) avec le modèle <strong>{engineConfig.daemon_model || 'par défaut'}</strong> est actif et prêt à l'emploi. Le téléchargement de fichiers <code>.gguf</code> locaux est entièrement facultatif.
+                  </p>
+                </div>
               </div>
-            </div>
+            {:else}
+              <div class="empty-models-box">
+                <p><strong>⚠️ Aucun modèle <code>.gguf</code> détecté dans le dossier <code>models/</code>.</strong></p>
+                <p class="hint-muted">
+                  Pour exécuter l'IA en local 100% hors-ligne, déposez un ou plusieurs fichiers <code>.gguf</code> dans le dossier ci-dessus, puis cliquez sur <strong>« Actualiser »</strong>.
+                </p>
+                <div class="recommended-downloads">
+                  <a
+                    class="model-download-card"
+                    href="https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <div class="dl-info">
+                      <span class="dl-title">Qwen3.5-2B (Q4_K_M) — Recommandé</span>
+                      <span class="dl-desc">Ultra-frugal, rapide et précis, optimisé pour PC &le; 16 Go avec iGPU (~1.28 Go)</span>
+                    </div>
+                    <span class="dl-action">🤗 Télécharger</span>
+                  </a>
+                  <a
+                    class="model-download-card"
+                    href="https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <div class="dl-info">
+                      <span class="dl-title">Llama-3.2-3B-Instruct (Q4_K_M)</span>
+                      <span class="dl-desc">Grande polyvalence en rédaction et synthèse (~2.0 Go)</span>
+                    </div>
+                    <span class="dl-action">🤗 Télécharger</span>
+                  </a>
+                </div>
+              </div>
+            {/if}
           {:else}
             <div class="models-grid">
               {#each availableModels as model}
@@ -2335,6 +2357,39 @@
     flex-direction: column;
     gap: 0.75rem;
     font-size: 0.88rem;
+  }
+
+  .server-active-box {
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    background: rgba(34, 197, 94, 0.06);
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .server-active-icon {
+    font-size: 1.4rem;
+    line-height: 1;
+    margin-top: 2px;
+  }
+
+  .server-active-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .server-active-title {
+    color: #86efac;
+    margin: 0;
+    font-size: 0.95rem;
+  }
+
+  .alert-info-server {
+    background: rgba(14, 165, 233, 0.12);
+    border: 1px solid rgba(14, 165, 233, 0.35);
+    color: #bae6fd;
+    margin-bottom: 1rem;
   }
 
   .empty-models-box p {
