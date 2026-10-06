@@ -37,7 +37,12 @@
     "allow-get-voice-status",
     "allow-list-audio-devices",
     "allow-transcribe-pcm-chunk",
-    "allow-synthesize-text-to-audio"
+    "allow-synthesize-text-to-audio",
+    "allow-start-meeting-recording",
+    "allow-stop-meeting-recording",
+    "allow-get-meeting-recording-status",
+    "allow-list-meeting-sessions",
+    "allow-seek-meeting-audio"
   ]
 }
 

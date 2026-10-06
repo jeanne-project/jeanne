@@ -1,6 +1,7 @@
 use jeanne_core::{
     AudioDevicesReport, CancellationToken, HardwareInfo, IndexedChunk, LocalEngineConfig,
-    LocalInferenceStats, LocalLlmEngine, NoteFrontmatter, PiperTtsEngine, SearchResult,
+    LocalInferenceStats, LocalLlmEngine, MeetingConfig, MeetingRecorder, MeetingSession,
+    MeetingStatus, MeetingSummaryResult, NoteFrontmatter, PiperTtsEngine, SearchResult,
     SnippetItem, StorageManager, TaskItem, VadConfig, VaultStats, VaultWatcher, VoicePipeline,
     VoiceStatus, WhisperSttEngine, get_audio_devices,
 };
@@ -12,13 +13,14 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::io::AsyncWriteExt;
 
 /// État applicatif partagé contenant l'accès sécurisé au moteur SQLite, le chemin racine du coffre,
-/// le moteur d'inférence local single-tenant et le coordinateur du pipeline vocal.
+/// le moteur d'inférence local single-tenant, le pipeline vocal et le coordinateur de réunion.
 pub struct AppState {
     pub storage: Arc<Mutex<StorageManager>>,
     pub vault_path: PathBuf,
     pub watcher: Mutex<Option<VaultWatcher>>,
     pub local_engine: Arc<LocalLlmEngine>,
     pub voice_pipeline: Arc<VoicePipeline>,
+    pub meeting_recorder: Arc<MeetingRecorder>,
 }
 
 #[tauri::command]
@@ -708,10 +710,50 @@ async fn synthesize_text_to_audio(
     state: tauri::State<'_, AppState>,
     text: String,
 ) -> Result<Vec<f32>, String> {
+}
+
+#[tauri::command]
+async fn start_meeting_recording(
+    state: tauri::State<'_, AppState>,
+    title: Option<String>,
+) -> Result<MeetingStatus, String> {
     state
-        .voice_pipeline
-        .synthesize_speech(&text)
+        .meeting_recorder
+        .start_recording(title)
         .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stop_meeting_recording(
+    state: tauri::State<'_, AppState>,
+) -> Result<MeetingSummaryResult, String> {
+    state
+        .meeting_recorder
+        .stop_recording()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_meeting_recording_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<MeetingStatus, String> {
+    Ok(state.meeting_recorder.get_status().await)
+}
+
+#[tauri::command]
+async fn list_meeting_sessions(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<MeetingSession>, String> {
+    MeetingRecorder::list_meeting_sessions(&state.vault_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn seek_meeting_audio(state: tauri::State<'_, AppState>, seconds: u64) -> Result<(), String> {
+    state
+        .meeting_recorder
+        .seek_meeting_audio(seconds)
         .map_err(|e| e.to_string())
 }
 
@@ -806,8 +848,12 @@ pub fn run() {
             toggle_voice_pipeline,
             get_voice_status,
             list_audio_devices,
-            transcribe_pcm_chunk,
-            synthesize_text_to_audio
+            synthesize_text_to_audio,
+            start_meeting_recording,
+            stop_meeting_recording,
+            get_meeting_recording_status,
+            list_meeting_sessions,
+            seek_meeting_audio
         ])
         .setup(|app| {
             tracing::info!("Initialisation des sous-systèmes Jeanne Desktop...");
@@ -895,12 +941,23 @@ pub fn run() {
                 Arc::new(PiperTtsEngine::new(None)),
             ));
 
+            let temp_audio_dir = vault_path.join(".jeanne").join("audio_temp");
+            let meeting_recorder = Arc::new(MeetingRecorder::new(
+                MeetingConfig::default(),
+                temp_audio_dir.clone(),
+                vault_path.clone(),
+            ));
+
+            // Récupération automatique des sessions orphelines au démarrage
+            let _ = MeetingRecorder::recover_orphaned_sessions(&vault_path, &temp_audio_dir);
+
             app.manage(AppState {
                 storage: storage_arc,
                 vault_path,
                 watcher: Mutex::new(Some(watcher)),
                 local_engine,
                 voice_pipeline,
+                meeting_recorder,
             });
 
             // Enregistrement du raccourci global avec repli en cascade
@@ -1044,12 +1101,18 @@ mod tests {
             Arc::new(WhisperSttEngine::new(None)),
             Arc::new(PiperTtsEngine::new(None)),
         ));
+        let meeting_recorder = Arc::new(MeetingRecorder::new(
+            MeetingConfig::default(),
+            temp_dir.path().join("audio_temp"),
+            temp_dir.path().to_path_buf(),
+        ));
         let app_state = AppState {
             storage: Arc::new(Mutex::new(storage)),
             vault_path: temp_dir.path().to_path_buf(),
             watcher: Mutex::new(None),
             local_engine: local_engine.clone(),
             voice_pipeline,
+            meeting_recorder,
         };
 
         // Test insertion manuelle et recherche
@@ -1226,12 +1289,18 @@ mod tests {
             Arc::new(WhisperSttEngine::new(None)),
             Arc::new(PiperTtsEngine::new(None)),
         ));
+        let meeting_recorder = Arc::new(MeetingRecorder::new(
+            MeetingConfig::default(),
+            temp_dir.path().join("audio_temp"),
+            temp_dir.path().to_path_buf(),
+        ));
         let app_state = AppState {
             storage: Arc::new(Mutex::new(storage)),
             vault_path: temp_dir.path().to_path_buf(),
             watcher: Mutex::new(None),
             local_engine: local_engine.clone(),
             voice_pipeline: voice_pipeline.clone(),
+            meeting_recorder,
         };
 
         let hw = app_state.local_engine.hardware_info();
@@ -1257,12 +1326,18 @@ mod tests {
             Arc::new(WhisperSttEngine::new(None)),
             Arc::new(PiperTtsEngine::new(None)),
         ));
+        let meeting_recorder = Arc::new(MeetingRecorder::new(
+            MeetingConfig::default(),
+            temp_dir.path().join("audio_temp"),
+            temp_dir.path().to_path_buf(),
+        ));
         let app_state = AppState {
             storage: Arc::new(Mutex::new(storage)),
             vault_path: temp_dir.path().to_path_buf(),
             watcher: Mutex::new(None),
             local_engine: local_engine.clone(),
             voice_pipeline: voice_pipeline.clone(),
+            meeting_recorder,
         };
 
         let initial = app_state.local_engine.get_config().await;
@@ -1321,12 +1396,18 @@ mod tests {
             Arc::new(WhisperSttEngine::new(None)),
             Arc::new(PiperTtsEngine::new(None)),
         ));
+        let meeting_recorder = Arc::new(MeetingRecorder::new(
+            MeetingConfig::default(),
+            temp_dir.path().join("audio_temp"),
+            temp_dir.path().to_path_buf(),
+        ));
         let app_state = AppState {
             storage: Arc::new(Mutex::new(storage)),
             vault_path: temp_dir.path().to_path_buf(),
             watcher: Mutex::new(None),
             local_engine,
             voice_pipeline: voice_pipeline.clone(),
+            meeting_recorder,
         };
 
         assert!(!app_state.voice_pipeline.is_active().await);
@@ -1344,5 +1425,56 @@ mod tests {
         assert!(!app_state.voice_pipeline.is_active().await);
         let stopped_status = app_state.voice_pipeline.get_status().await;
         assert_eq!(stopped_status.memory_allocated_mb, 0);
+    }
+
+    #[tokio::test]
+    async fn test_desktop_meeting_recorder_lifecycle_and_commands() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("test.db");
+        let storage = StorageManager::open(&db_path).expect("open storage");
+        storage.init_schema().expect("init schema");
+
+        let local_engine = Arc::new(LocalLlmEngine::new(LocalEngineConfig::default()));
+        let voice_pipeline = Arc::new(VoicePipeline::new(
+            VadConfig::default(),
+            Arc::new(WhisperSttEngine::new(None)),
+            Arc::new(PiperTtsEngine::new(None)),
+        ));
+        let meeting_recorder = Arc::new(MeetingRecorder::new(
+            MeetingConfig::default(),
+            temp_dir.path().join("audio_temp"),
+            temp_dir.path().to_path_buf(),
+        ));
+        let app_state = AppState {
+            storage: Arc::new(Mutex::new(storage)),
+            vault_path: temp_dir.path().to_path_buf(),
+            watcher: Mutex::new(None),
+            local_engine,
+            voice_pipeline,
+            meeting_recorder: meeting_recorder.clone(),
+        };
+
+        let initial_status = app_state.meeting_recorder.get_status().await;
+        assert!(!initial_status.is_recording);
+        assert_eq!(initial_status.memory_allocated_mb, 0);
+
+        let started = app_state
+            .meeting_recorder
+            .start_recording(Some("Test Réunion Desktop".to_string()))
+            .await
+            .expect("start recording");
+        assert!(started.is_recording);
+        assert!(started.memory_allocated_mb < 100);
+
+        let stopped = app_state
+            .meeting_recorder
+            .stop_recording()
+            .await
+            .expect("stop recording");
+        assert!(!stopped.note_path.is_empty());
+
+        let final_status = app_state.meeting_recorder.get_status().await;
+        assert!(!final_status.is_recording);
+        assert_eq!(final_status.memory_allocated_mb, 0);
     }
 }

@@ -1,0 +1,51 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-meeting-recording"
+description = "Enables start_meeting_recording command."
+commands.allow = ["start_meeting_recording"]
+
+[[permission]]
+identifier = "deny-start-meeting-recording"
+description = "Denies start_meeting_recording command."
+commands.deny = ["start_meeting_recording"]
+
+[[permission]]
+identifier = "allow-stop-meeting-recording"
+description = "Enables stop_meeting_recording command."
+commands.allow = ["stop_meeting_recording"]
+
+[[permission]]
+identifier = "deny-stop-meeting-recording"
+description = "Denies stop_meeting_recording command."
+commands.deny = ["stop_meeting_recording"]
+
+[[permission]]
+identifier = "allow-get-meeting-recording-status"
+description = "Enables get_meeting_recording_status command."
+commands.allow = ["get_meeting_recording_status"]
+
+[[permission]]
+identifier = "deny-get-meeting-recording-status"
+description = "Denies get_meeting_recording_status command."
+commands.deny = ["get_meeting_recording_status"]
+
+[[permission]]
+identifier = "allow-list-meeting-sessions"
+description = "Enables list_meeting_sessions command."
+commands.allow = ["list_meeting_sessions"]
+
+[[permission]]
+identifier = "deny-list-meeting-sessions"
+description = "Denies list_meeting_sessions command."
+commands.deny = ["list_meeting_sessions"]
+
+[[permission]]
+identifier = "allow-seek-meeting-audio"
+description = "Enables seek_meeting_audio command."
+commands.allow = ["seek_meeting_audio"]
+
+[[permission]]
+identifier = "deny-seek-meeting-audio"
+description = "Denies seek_meeting_audio command."
+commands.deny = ["seek_meeting_audio"]
