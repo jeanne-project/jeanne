@@ -513,7 +513,7 @@
         <div class="stats-cards">
           <div class="stat-card">
             <span class="stat-label">RAM Système (Dispo / Total)</span>
-            <span class="stat-value">{hardwareInfo ? `${Math.round(hardwareInfo.available_ram_mb / 1024)}G / ${Math.round(hardwareInfo.total_system_ram_mb / 1024)}G` : '...'}</span>
+            <span class="stat-value">{hardwareInfo ? (hardwareInfo.total_system_ram_mb > 0 ? `${Math.round(hardwareInfo.available_ram_mb / 1024)}G / ${Math.round(hardwareInfo.total_system_ram_mb / 1024)}G` : '- / -') : '...'}</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">Accélération Vulkan</span>
@@ -1139,7 +1139,7 @@
           <div class="stats-cards">
             <div class="stat-card">
               <span class="stat-label">RAM Totale / Disponible</span>
-              <span class="stat-value">{hardwareInfo ? `${Math.round(hardwareInfo.available_ram_mb / 1024)}G dispo / ${Math.round(hardwareInfo.total_system_ram_mb / 1024)}G` : '...'}</span>
+              <span class="stat-value">{hardwareInfo ? (hardwareInfo.total_system_ram_mb > 0 ? `${Math.round(hardwareInfo.available_ram_mb / 1024)}G dispo / ${Math.round(hardwareInfo.total_system_ram_mb / 1024)}G` : '- / -') : '...'}</span>
             </div>
             <div class="stat-card">
               <span class="stat-label">Accélération Vulkan (GPU)</span>
