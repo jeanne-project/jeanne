@@ -664,15 +664,14 @@ pub fn extract_search_keywords(text: &str) -> Vec<String> {
 
     let stop_words: std::collections::HashSet<&'static str> = [
         // Français
-        "de", "des", "du", "le", "la", "les", "un", "une", "est", "sont", "été", "ete", "être", "etre",
-        "a", "ont", "avoir", "ce", "cet", "cette", "ces", "mon", "ma", "mes", "ton", "ta", "tes",
-        "son", "sa", "ses", "notre", "nos", "votre", "vos", "leur", "leurs", "qui", "que", "quoi",
-        "dont", "ou", "où", "quand", "comment", "pourquoi", "quel", "quelle", "quels", "quelles",
-        "combien", "dans", "sur", "sous", "pour", "par", "avec", "sans", "en", "au", "aux", "y",
-        "il", "elle", "on", "ils", "elles", "je", "tu", "nous", "vous", "me", "te", "se", "moi",
-        "toi", "lui", "eux", "ceci", "cela", "ca", "ça", "quelque", "quelques", "plus", "moins",
-        "tres", "très", "bien", "faire", "fait",
-        // Anglais
+        "de", "des", "du", "le", "la", "les", "un", "une", "est", "sont", "été", "ete", "être",
+        "etre", "a", "ont", "avoir", "ce", "cet", "cette", "ces", "mon", "ma", "mes", "ton", "ta",
+        "tes", "son", "sa", "ses", "notre", "nos", "votre", "vos", "leur", "leurs", "qui", "que",
+        "quoi", "dont", "ou", "où", "quand", "comment", "pourquoi", "quel", "quelle", "quels",
+        "quelles", "combien", "dans", "sur", "sous", "pour", "par", "avec", "sans", "en", "au",
+        "aux", "y", "il", "elle", "on", "ils", "elles", "je", "tu", "nous", "vous", "me", "te",
+        "se", "moi", "toi", "lui", "eux", "ceci", "cela", "ca", "ça", "quelque", "quelques",
+        "plus", "moins", "tres", "très", "bien", "faire", "fait", // Anglais
         "what", "which", "who", "whom", "where", "when", "why", "how", "is", "are", "was", "were",
         "be", "been", "the", "in", "on", "at", "to", "for", "of", "with", "my", "your", "his",
         "her", "their", "our",

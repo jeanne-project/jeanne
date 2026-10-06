@@ -1746,10 +1746,22 @@ fn translate_fr_to_en(input: &str) -> String {
 
     // 1. Table d'expressions et locutions complètes courantes
     let exact_phrases: &[(&str, &str)] = &[
-        ("bonjour, comment vas-tu ce matin", "Good morning, how are you this morning?"),
-        ("bonjour, comment allez-vous ce matin", "Good morning, how are you this morning?"),
-        ("bonjour, comment ça va ce matin", "Good morning, how are you this morning?"),
-        ("bonjour, comment ca va ce matin", "Good morning, how are you this morning?"),
+        (
+            "bonjour, comment vas-tu ce matin",
+            "Good morning, how are you this morning?",
+        ),
+        (
+            "bonjour, comment allez-vous ce matin",
+            "Good morning, how are you this morning?",
+        ),
+        (
+            "bonjour, comment ça va ce matin",
+            "Good morning, how are you this morning?",
+        ),
+        (
+            "bonjour, comment ca va ce matin",
+            "Good morning, how are you this morning?",
+        ),
         ("comment vas-tu ce matin", "How are you this morning?"),
         ("comment allez-vous ce matin", "How are you this morning?"),
         ("comment ça va ce matin", "How are you this morning?"),
@@ -2026,7 +2038,10 @@ fn translate_en_to_fr(input: &str) -> String {
     let exact_phrases: &[(&str, &str)] = &[
         ("how are you", "Comment allez-vous ?"),
         ("how are you doing", "Comment allez-vous ?"),
-        ("good morning, how are you this morning", "Bonjour, comment allez-vous ce matin ?"),
+        (
+            "good morning, how are you this morning",
+            "Bonjour, comment allez-vous ce matin ?",
+        ),
         ("hello, how are you", "Bonjour, comment ça va ?"),
         ("good morning", "Bonjour !"),
         ("good evening", "Bonsoir !"),
@@ -2169,8 +2184,9 @@ pub fn answer_rag_question(context_text: &str, question: &str) -> String {
     // 2. Recherche spécifique pour les questions de couleur (ex: "de quelle couleur est ma voiture ?")
     let colors = [
         "bleu", "bleue", "bleus", "bleues", "rouge", "rouges", "vert", "verte", "verts", "vertes",
-        "noir", "noire", "noirs", "noires", "blanc", "blanche", "blancs", "blanches", "jaune", "jaunes",
-        "gris", "grise", "grises", "orange", "violet", "violette", "rose", "marron", "beige", "brun", "brune"
+        "noir", "noire", "noirs", "noires", "blanc", "blanche", "blancs", "blanches", "jaune",
+        "jaunes", "gris", "grise", "grises", "orange", "violet", "violette", "rose", "marron",
+        "beige", "brun", "brune",
     ];
 
     let is_asking_color = q_lower.contains("couleur") || q_lower.contains("color");
@@ -2218,10 +2234,12 @@ pub fn answer_rag_question(context_text: &str, question: &str) -> String {
             if matches_count > 0 {
                 if let Some((_, _, best_count)) = &best_sentence {
                     if matches_count > *best_count {
-                        best_sentence = Some((note.title.clone(), trimmed_line.to_string(), matches_count));
+                        best_sentence =
+                            Some((note.title.clone(), trimmed_line.to_string(), matches_count));
                     }
                 } else {
-                    best_sentence = Some((note.title.clone(), trimmed_line.to_string(), matches_count));
+                    best_sentence =
+                        Some((note.title.clone(), trimmed_line.to_string(), matches_count));
                 }
             }
         }
@@ -2231,10 +2249,19 @@ pub fn answer_rag_question(context_text: &str, question: &str) -> String {
         let clean_sentence = sentence.trim_end_matches('.');
         format!("D'après vos notes [source: {title}], {clean_sentence}.")
     } else if let Some(first_note) = notes.first() {
-        let first_snippet = first_note.body.lines().next().unwrap_or(&first_note.body).trim();
-        format!("D'après vos notes [source: {}] : « {} ».", first_note.title, first_snippet)
+        let first_snippet = first_note
+            .body
+            .lines()
+            .next()
+            .unwrap_or(&first_note.body)
+            .trim();
+        format!(
+            "D'après vos notes [source: {}] : « {} ».",
+            first_note.title, first_snippet
+        )
     } else {
-        "L'information n'est pas présente dans les notes consultées. [source: Notes du coffre]".to_string()
+        "L'information n'est pas présente dans les notes consultées. [source: Notes du coffre]"
+            .to_string()
     }
 }
 
@@ -2298,11 +2325,7 @@ pub fn synthesize_local_response(prompt: &str) -> Vec<String> {
         };
 
         let context_text = if let Some(c_part) = trimmed.split("Extraits du coffre :\n").nth(1) {
-            c_part
-                .split("\n\nQuestion :")
-                .next()
-                .unwrap_or("")
-                .trim()
+            c_part.split("\n\nQuestion :").next().unwrap_or("").trim()
         } else {
             ""
         };

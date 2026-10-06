@@ -1,6 +1,7 @@
 use jeanne_core::voice::{
-    get_audio_devices, AudioResampler, PiperTtsEngine, SentenceSplitter, VadConfig, VadDecision,
+    AudioResampler, PiperTtsEngine, SentenceSplitter, VadConfig, VadDecision,
     VoiceActivityDetector, VoiceError, VoicePipeline, VoiceState, WhisperSttEngine,
+    get_audio_devices,
 };
 use std::f32::consts::PI;
 use std::sync::Arc;
@@ -66,7 +67,11 @@ fn test_05_03_interleaved_stereo_downmix() {
         .expect("process_interleaved_chunk");
 
     let diff = (mono_resampled.len() as i64 - 16000).abs();
-    assert!(diff <= 15, "Longueur attendue ~16000, obtenu {}", mono_resampled.len());
+    assert!(
+        diff <= 15,
+        "Longueur attendue ~16000, obtenu {}",
+        mono_resampled.len()
+    );
 
     let avg: f32 = mono_resampled.iter().sum::<f32>() / mono_resampled.len() as f32;
     assert!(

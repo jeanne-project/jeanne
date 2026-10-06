@@ -13,9 +13,9 @@ pub mod vault;
 pub mod voice;
 
 pub use voice::{
-    get_audio_devices, AudioDevice, AudioDevicesReport, AudioResampler, PiperTtsEngine,
-    SentenceSplitter, SttEngine, TtsEngine, VadConfig, VadDecision, VoiceActivityDetector,
-    VoiceError, VoicePipeline, VoiceState, VoiceStatus, WhisperSttEngine,
+    AudioDevice, AudioDevicesReport, AudioResampler, PiperTtsEngine, SentenceSplitter, SttEngine,
+    TtsEngine, VadConfig, VadDecision, VoiceActivityDetector, VoiceError, VoicePipeline,
+    VoiceState, VoiceStatus, WhisperSttEngine, get_audio_devices,
 };
 
 pub use model_discovery::{

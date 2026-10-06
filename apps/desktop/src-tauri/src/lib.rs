@@ -1,8 +1,8 @@
 use jeanne_core::{
-    get_audio_devices, AudioDevicesReport, CancellationToken, HardwareInfo, IndexedChunk,
-    LocalEngineConfig, LocalInferenceStats, LocalLlmEngine, NoteFrontmatter, PiperTtsEngine,
-    SearchResult, SnippetItem, StorageManager, TaskItem, VadConfig, VaultStats, VaultWatcher,
-    VoicePipeline, VoiceStatus, WhisperSttEngine,
+    AudioDevicesReport, CancellationToken, HardwareInfo, IndexedChunk, LocalEngineConfig,
+    LocalInferenceStats, LocalLlmEngine, NoteFrontmatter, PiperTtsEngine, SearchResult,
+    SnippetItem, StorageManager, TaskItem, VadConfig, VaultStats, VaultWatcher, VoicePipeline,
+    VoiceStatus, WhisperSttEngine, get_audio_devices,
 };
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -618,11 +618,7 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Resul
             }
         };
 
-        context_chunks.push(format!(
-            "--- Note : {} ---\n{}",
-            hit.title,
-            note_body
-        ));
+        context_chunks.push(format!("--- Note : {} ---\n{}", hit.title, note_body));
     }
     let context_text = context_chunks.join("\n\n");
 
@@ -667,17 +663,23 @@ async fn toggle_voice_pipeline(
     active: bool,
 ) -> Result<bool, String> {
     if active {
-        state.voice_pipeline.start().await.map_err(|e| e.to_string())?;
+        state
+            .voice_pipeline
+            .start()
+            .await
+            .map_err(|e| e.to_string())?;
     } else {
-        state.voice_pipeline.stop().await.map_err(|e| e.to_string())?;
+        state
+            .voice_pipeline
+            .stop()
+            .await
+            .map_err(|e| e.to_string())?;
     }
     Ok(state.voice_pipeline.is_active().await)
 }
 
 #[tauri::command]
-async fn get_voice_status(
-    state: tauri::State<'_, AppState>,
-) -> Result<VoiceStatus, String> {
+async fn get_voice_status(state: tauri::State<'_, AppState>) -> Result<VoiceStatus, String> {
     Ok(state.voice_pipeline.get_status().await)
 }
 

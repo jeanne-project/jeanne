@@ -767,12 +767,19 @@ fn test_storage_search_question_natural_language() {
     let results = storage
         .search_fts("de quelle couleur est ma voiture ?", 3)
         .expect("search");
-    assert_eq!(results.len(), 1, "La note 'Ma voiture est bleu' doit être trouvée via la question");
+    assert_eq!(
+        results.len(),
+        1,
+        "La note 'Ma voiture est bleu' doit être trouvée via la question"
+    );
     assert_eq!(results[0].title, "Voiture");
 
     let question_results = storage
         .search_question("de quelle couleur est ma voiture ?", 3)
         .expect("search_question");
-    assert_eq!(question_results.len(), 1, "search_question doit également retrouver la note");
+    assert_eq!(
+        question_results.len(),
+        1,
+        "search_question doit également retrouver la note"
+    );
 }
-

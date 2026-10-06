@@ -39,6 +39,7 @@ check-git-clean:
 pre-review:
     @echo "=== [Pre-Review] Exécution des contrôles qualité ==="
     just check-permissions
+    cargo fmt --check
     cargo clippy -p jeanne-core --all-targets -- -D warnings
     cargo test -p jeanne-core
     cd apps/desktop && npm run build

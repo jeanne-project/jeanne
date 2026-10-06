@@ -191,7 +191,9 @@ impl AudioResampler {
 
     pub fn new(input_rate: u32, channels: u16) -> Result<Self, VoiceError> {
         if channels == 0 {
-            return Err(VoiceError::Format("Nombre de canaux invalide (0)".to_string()));
+            return Err(VoiceError::Format(
+                "Nombre de canaux invalide (0)".to_string(),
+            ));
         }
         let resampler = FastFixedIn::<f32>::new(
             Self::TARGET_RATE as f64 / input_rate as f64,
@@ -274,8 +276,9 @@ impl AudioResampler {
 
             if let Some(ch) = resampled.first() {
                 if slice.len() < chunk_size {
-                    let expected_frames =
-                        ((slice.len() as f64 * target_rate as f64) / input_rate as f64).round() as usize;
+                    let expected_frames = ((slice.len() as f64 * target_rate as f64)
+                        / input_rate as f64)
+                        .round() as usize;
                     output.extend_from_slice(&ch[..expected_frames.min(ch.len())]);
                 } else {
                     output.extend_from_slice(ch);
@@ -409,9 +412,9 @@ impl Default for SentenceSplitter {
 
 impl SentenceSplitter {
     const ABBREVIATIONS: &'static [&'static str] = &[
-        "e.g.", "i.e.", "etc.", "mr.", "mrs.", "ms.", "dr.", "prof.", "vs.",
-        "inc.", "corp.", "ltd.", "co.", "cf.", "al.", "jan.", "feb.", "mar.",
-        "apr.", "jun.", "jul.", "aug.", "sep.", "oct.", "nov.", "dec.",
+        "e.g.", "i.e.", "etc.", "mr.", "mrs.", "ms.", "dr.", "prof.", "vs.", "inc.", "corp.",
+        "ltd.", "co.", "cf.", "al.", "jan.", "feb.", "mar.", "apr.", "jun.", "jul.", "aug.",
+        "sep.", "oct.", "nov.", "dec.",
     ];
 
     pub fn new() -> Self {
@@ -552,9 +555,7 @@ impl TtsEngine for PiperTtsEngine {
         // Synthèse audio déterministe (onde sinusoïdale 440 Hz à 16 kHz)
         let sample_count = (trimmed.len() * 320).clamp(1600, 48000);
         let audio: Vec<f32> = (0..sample_count)
-            .map(|i| {
-                0.25 * (2.0 * std::f32::consts::PI * 440.0 * (i as f32) / 16000.0).sin()
-            })
+            .map(|i| 0.25 * (2.0 * std::f32::consts::PI * 440.0 * (i as f32) / 16000.0).sin())
             .collect();
         Ok(audio)
     }
