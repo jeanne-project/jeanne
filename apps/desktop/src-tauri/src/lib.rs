@@ -621,12 +621,7 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Resul
             .storage
             .lock()
             .map_err(|e| format!("Erreur accès base de données : {e}"))?;
-        let res = storage.search_question(clean_q, 3).unwrap_or_default();
-        if res.is_empty() {
-            storage.search_fts(clean_q, 3).unwrap_or_default()
-        } else {
-            res
-        }
+        storage.search_question(clean_q, 3).unwrap_or_default()
     };
 
     if search_results.is_empty() {
@@ -636,7 +631,7 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Resul
         );
     }
 
-    let mut context_chunks = Vec::new();
+    let mut hybrid_results = Vec::new();
     for hit in &search_results {
         let note_body = {
             let note_path = state.vault_path.join(&hit.file_path);
@@ -658,14 +653,35 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> Resul
             }
         };
 
-        context_chunks.push(format!("--- Note : {} ---\n{}", hit.title, note_body));
+        hybrid_results.push(jeanne_core::HybridSearchResult {
+            chunk_id: hit.chunk_id.clone(),
+            file_path: hit.file_path.clone(),
+            content: note_body,
+            vector_score: 0.0,
+            bm25_score: hit.score,
+            combined_score: hit.score,
+            coala_type: jeanne_core::CoalaType::Semantic,
+            status: jeanne_core::NoteStatus::from_str_lenient(&hit.statut),
+            superseded_by: None,
+            deprecated_at: None,
+            age_days: 0.0,
+        });
     }
-    let context_text = context_chunks.join("\n\n");
 
     if state.local_engine.is_inference_ready().await {
-        let prompt = format!(
-            "Tu es Jeanne, assistant de connaissances. Réponds à la question suivante en te basant STRICTEMENT sur les extraits du coffre fournis ci-dessous. Si l'information n'est pas présente, indique-le honnêtement. Cite la note source entre crochets [source: titre].\n\nExtraits du coffre :\n{context_text}\n\nQuestion : {clean_q}\n\nRéponse :"
+        let messages = jeanne_core::build_rag_prompt(
+            clean_q,
+            &hybrid_results,
+            Some(
+                "Tu es Jeanne, assistant de connaissances. Réponds à la question suivante en te basant STRICTEMENT sur les extraits du coffre fournis ci-dessous. Si l'information n'est pas présente, indique-le honnêtement. Chaque affirmation factuelle DOIT citer sa note source au format strict `[source: nom_fichier.md]`.",
+            ),
         );
+        let prompt = messages
+            .into_iter()
+            .map(|m| format!("{}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+            + "\n\nassistant: ";
 
         let cancel = CancellationToken::new();
         let mut rx = state

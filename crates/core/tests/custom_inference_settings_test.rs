@@ -384,3 +384,70 @@ async fn test_pii_redaction_on_remote_server() {
         "Voici jean.dupont@example.com et FR7630006000011234567890189"
     );
 }
+
+#[tokio::test]
+async fn test_04g_01_hardware_context_decoupling_and_payload_sanitization() {
+    // 1. Découplage du contexte KV
+    let config = LocalEngineConfig {
+        context_size: 16384,
+        daemon_endpoint: Some("https://remote-llm.corp.local/v1".to_string()),
+        ..Default::default()
+    };
+
+    let engine = LocalLlmEngine::new(config.clone());
+    assert_eq!(
+        engine.context_size(),
+        16384,
+        "Le contexte ne doit pas être bridé par la RAM physique locale si un serveur distant est configuré"
+    );
+
+    // 2. Vérification de la sanitisation du payload distant (OpenAI standard, sans options)
+    let remote_payload =
+        jeanne_core::local_llm::build_chat_payload(&config, "model-x", "Hello", true, 0);
+    assert!(
+        remote_payload.get("options").is_none(),
+        "Le payload vers serveur distant ne doit pas comporter le champ 'options'"
+    );
+
+    // 3. Vérification de la conservation du champ 'options' pour les serveurs locaux (Ollama/llama-server)
+    let local_payload =
+        jeanne_core::local_llm::build_chat_payload(&config, "model-x", "Hello", false, 33);
+    assert!(
+        local_payload.get("options").is_some(),
+        "Le payload vers serveur local doit comporter le champ 'options'"
+    );
+    assert_eq!(local_payload["options"]["num_gpu"], 33);
+}
+
+#[tokio::test]
+async fn test_04g_02_llm_provider_fetch_models_integration() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let req = read_full_request(&mut socket).await;
+            if req.contains("GET /models") {
+                let body = "{\"data\": [{\"id\": \"cluster-deepseek-v3\"}]}";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(resp.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        }
+    });
+
+    let config = LocalEngineConfig {
+        daemon_endpoint: Some(format!("http://127.0.0.1:{port}")),
+        ..Default::default()
+    };
+    let engine = LocalLlmEngine::new(config);
+
+    // fetch_models via le trait LlmProvider
+    use jeanne_core::LlmProvider;
+    let models = engine.fetch_models().await.expect("Fetch models failed");
+    assert_eq!(models, vec!["cluster-deepseek-v3".to_string()]);
+}

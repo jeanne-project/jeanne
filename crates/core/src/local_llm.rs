@@ -168,14 +168,24 @@ pub fn calculate_max_allowed_context(total_ram_mb: u64, allow_extended: bool) ->
 }
 
 impl LocalLlmEngine {
-    /// Crée une nouvelle instance du moteur local avec contexte KV borné selon la RAM détectée (débridable sur machine puissante).
+    /// Crée une nouvelle instance du moteur local avec contexte KV borné selon la RAM détectée (débridable sur machine puissante ou serveur distant).
     pub fn new(mut config: LocalEngineConfig) -> Self {
         let hardware = detect_hardware();
-        let max_context = calculate_max_allowed_context(
-            hardware.total_system_ram_mb,
-            config.allow_extended_context,
-        );
-        let clamped_context = config.context_size.min(max_context);
+        let has_custom_endpoint = config
+            .daemon_endpoint
+            .as_ref()
+            .map(|e| !e.trim().is_empty())
+            .unwrap_or(false);
+
+        let clamped_context = if has_custom_endpoint {
+            config.context_size.min(32768)
+        } else {
+            let max_context = calculate_max_allowed_context(
+                hardware.total_system_ram_mb,
+                config.allow_extended_context,
+            );
+            config.context_size.min(max_context)
+        };
         config.context_size = clamped_context;
         config.use_vulkan = config.use_gpu;
 
@@ -197,11 +207,22 @@ impl LocalLlmEngine {
 
     /// Met à jour la configuration du moteur local (GPU, threads, timeout, température, etc.).
     pub async fn update_config(&self, mut new_config: LocalEngineConfig) {
+        let has_custom_endpoint = new_config
+            .daemon_endpoint
+            .as_ref()
+            .map(|e| !e.trim().is_empty())
+            .unwrap_or(false);
+
         let max_context = calculate_max_allowed_context(
             self.hardware.total_system_ram_mb,
             new_config.allow_extended_context,
         );
-        let clamped_context = new_config.context_size.min(max_context);
+
+        let clamped_context = if has_custom_endpoint {
+            new_config.context_size.min(32768)
+        } else {
+            new_config.context_size.min(max_context)
+        };
         new_config.context_size = clamped_context;
         new_config.use_vulkan = new_config.use_gpu;
 
@@ -646,6 +667,24 @@ impl LlmProvider for LocalLlmEngine {
     }
 
     async fn fetch_models(&self) -> Result<Vec<String>, LlmError> {
+        let (endpoint, api_key) = {
+            let config = self.config.lock().await;
+            (
+                config.daemon_endpoint.clone(),
+                config.daemon_api_key.clone(),
+            )
+        };
+
+        if let Some(ep) = endpoint {
+            if !ep.trim().is_empty() {
+                if let Ok(models) = Self::fetch_remote_models(&ep, api_key.as_deref()).await {
+                    if !models.is_empty() {
+                        return Ok(models);
+                    }
+                }
+            }
+        }
+
         let models = crate::model_discovery::discover_models(None);
         if models.is_empty() {
             tracing::info!(
@@ -1167,6 +1206,53 @@ async fn detect_daemon_model_name(
     "qwen3.5:2b".to_string()
 }
 
+/// Construit le payload JSON de la requête chat/completions.
+/// Omet les paramètres spécifiques (options, num_gpu, num_thread) si le point de terminaison est distant (standard OpenAI).
+pub fn build_chat_payload(
+    config: &LocalEngineConfig,
+    model_name: &str,
+    final_prompt: &str,
+    is_remote: bool,
+    num_gpu: u32,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "model": model_name,
+        "messages": [
+            {"role": "user", "content": final_prompt}
+        ],
+        "stream": true,
+        "temperature": config.temperature,
+        "max_tokens": config.max_tokens,
+    });
+
+    if !is_remote {
+        payload["options"] = serde_json::json!({
+            "num_gpu": num_gpu,
+            "num_thread": config.threads
+        });
+    }
+
+    if let Some(top_p) = config.top_p {
+        payload["top_p"] = serde_json::json!(top_p);
+        if !is_remote {
+            if let Some(opts) = payload.get_mut("options") {
+                opts["top_p"] = serde_json::json!(top_p);
+            }
+        }
+    }
+
+    if let Some(top_k) = config.top_k {
+        payload["top_k"] = serde_json::json!(top_k);
+        if !is_remote {
+            if let Some(opts) = payload.get_mut("options") {
+                opts["top_k"] = serde_json::json!(top_k);
+            }
+        }
+    }
+
+    payload
+}
+
 async fn try_stream_from_local_daemon(
     prompt: &str,
     config: &LocalEngineConfig,
@@ -1280,32 +1366,7 @@ async fn try_stream_from_local_daemon(
         };
 
         let url = format!("{base_url}/chat/completions");
-        let mut payload = serde_json::json!({
-            "model": model_name,
-            "messages": [
-                {"role": "user", "content": final_prompt}
-            ],
-            "stream": true,
-            "temperature": config.temperature,
-            "max_tokens": config.max_tokens,
-            "options": {
-                "num_gpu": num_gpu,
-                "num_thread": config.threads
-            }
-        });
-
-        if let Some(top_p) = config.top_p {
-            payload["top_p"] = serde_json::json!(top_p);
-            if let Some(opts) = payload.get_mut("options") {
-                opts["top_p"] = serde_json::json!(top_p);
-            }
-        }
-        if let Some(top_k) = config.top_k {
-            payload["top_k"] = serde_json::json!(top_k);
-            if let Some(opts) = payload.get_mut("options") {
-                opts["top_k"] = serde_json::json!(top_k);
-            }
-        }
+        let payload = build_chat_payload(config, &model_name, &final_prompt, is_remote, num_gpu);
 
         let mut req_builder = client.post(&url).json(&payload);
         if let Some(key) = &config.daemon_api_key {
@@ -2405,24 +2466,44 @@ pub fn answer_rag_question(context_text: &str, question: &str) -> String {
     }
 
     let mut notes = Vec::new();
-    for block in context_text.split("--- Note : ") {
-        let trimmed_block = block.trim();
-        if trimmed_block.is_empty() {
-            continue;
+    if context_text.contains("[source: ") {
+        for block in context_text.split("[source: ") {
+            let trimmed = block.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Some((header, body)) = trimmed.split_once(']') {
+                notes.push(NoteExcerpt {
+                    title: header.trim().to_string(),
+                    body: body.trim().to_string(),
+                });
+            } else {
+                notes.push(NoteExcerpt {
+                    title: "Notes du coffre".to_string(),
+                    body: trimmed.to_string(),
+                });
+            }
         }
+    } else {
+        for block in context_text.split("--- Note : ") {
+            let trimmed_block = block.trim();
+            if trimmed_block.is_empty() {
+                continue;
+            }
 
-        if let Some((header, body)) = trimmed_block.split_once(" ---") {
-            let title = header.trim().to_string();
-            let body_clean = body.trim().to_string();
-            notes.push(NoteExcerpt {
-                title,
-                body: body_clean,
-            });
-        } else {
-            notes.push(NoteExcerpt {
-                title: "Notes du coffre".to_string(),
-                body: trimmed_block.to_string(),
-            });
+            if let Some((header, body)) = trimmed_block.split_once(" ---") {
+                let title = header.trim().to_string();
+                let body_clean = body.trim().to_string();
+                notes.push(NoteExcerpt {
+                    title,
+                    body: body_clean,
+                });
+            } else {
+                notes.push(NoteExcerpt {
+                    title: "Notes du coffre".to_string(),
+                    body: trimmed_block.to_string(),
+                });
+            }
         }
     }
 
@@ -2562,19 +2643,27 @@ pub fn synthesize_local_response(prompt: &str) -> Vec<String> {
     }
 
     // 5. Question RAG (/ask)
-    if trimmed.contains("Tu es Jeanne, assistant de connaissances") {
+    if trimmed.contains("Tu es Jeanne, assistant de connaissances")
+        || trimmed.contains("You are Jeanne")
+        || trimmed.contains("Extraits du coffre :")
+        || trimmed.contains("Context Documents:")
+    {
         let question = if let Some(q_part) = trimmed.split("Question : ").nth(1) {
             q_part
                 .split("\n\nRéponse :")
                 .next()
                 .unwrap_or(q_part)
                 .trim()
+        } else if let Some(q_part) = trimmed.split("Question: ").nth(1) {
+            q_part.split("\n\n").next().unwrap_or(q_part).trim()
         } else {
             "votre demande"
         };
 
         let context_text = if let Some(c_part) = trimmed.split("Extraits du coffre :\n").nth(1) {
             c_part.split("\n\nQuestion :").next().unwrap_or("").trim()
+        } else if let Some(c_part) = trimmed.split("Context Documents:\n").nth(1) {
+            c_part.split("\nQuestion:").next().unwrap_or("").trim()
         } else {
             ""
         };
@@ -2606,4 +2695,64 @@ pub fn is_remote_endpoint(url: &str) -> bool {
         || lower.contains("localhost")
         || lower.contains("0.0.0.0")
         || lower.contains("[::1]"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_inc_04_context_size_and_remote_payload_coherence() {
+        // 1. Vérification que le context_size n'est pas bridé si un daemon_endpoint est configuré
+        let config = LocalEngineConfig {
+            context_size: 16384,
+            daemon_endpoint: Some("https://api.openai.com/v1".to_string()),
+            ..Default::default()
+        };
+
+        let engine = LocalLlmEngine::new(config.clone());
+        assert_eq!(
+            engine.context_size(),
+            16384,
+            "Le context_size ne doit pas être bridé à 4096 quand un daemon est configuré."
+        );
+
+        // 2. Vérification que la requête distante omet le champ 'options'
+        let payload_remote = build_chat_payload(&config, "gpt-4", "Test prompt", true, 0);
+        assert!(
+            payload_remote.get("options").is_none(),
+            "La requête distante (OpenAI-compatible) ne doit pas contenir le champ interne 'options'."
+        );
+
+        // 3. Vérification que la requête locale conserve le champ 'options' pour Ollama/llama-server
+        let payload_local = build_chat_payload(&config, "qwen2", "Test prompt", false, 99);
+        assert!(
+            payload_local.get("options").is_some(),
+            "La requête locale DOIT contenir le champ 'options'."
+        );
+        assert_eq!(payload_local["options"]["num_gpu"], 99);
+    }
+
+    #[tokio::test]
+    async fn test_inc_05_fetch_models_fallback_local_when_no_daemon() {
+        let config = LocalEngineConfig::default();
+        let engine = LocalLlmEngine::new(config);
+
+        let models = engine.fetch_models().await.expect("L'appel doit réussir");
+        assert!(
+            !models.is_empty(),
+            "Doit retourner au moins le modèle recommandé par défaut"
+        );
+    }
+
+    #[test]
+    fn test_inc_06_rag_source_citation_parsing() {
+        let context = "[source: Architecture.md]\nLa base utilise sqlite-vec pour l'indexation.\n\n[source: Guide.md]\nLe frontend est développé en Svelte 5.";
+        let res = answer_rag_question(context, "Que contient la base ?");
+        assert!(
+            res.contains("[source: Architecture.md]"),
+            "La réponse doit contenir la citation de la note source : {}",
+            res
+        );
+    }
 }

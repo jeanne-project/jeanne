@@ -645,6 +645,20 @@ impl StorageManager {
 
     /// Recherche tolérante adaptée aux questions en langage naturel pour le RAG.
     pub fn search_question(&self, question: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        let keywords = extract_search_keywords(question);
+        if !keywords.is_empty() {
+            let fts_query = keywords
+                .iter()
+                .map(|k| format!("\"{}\"*", k.replace('"', "")))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+
+            let res = self.search_fts(&fts_query, limit)?;
+            if !res.is_empty() {
+                return Ok(res);
+            }
+        }
+
         self.search_fts(question, limit)
     }
 
@@ -741,4 +755,41 @@ fn html_escape(input: &str) -> String {
         }
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_search_question_keyword_fallback() {
+        let storage = StorageManager::open_in_memory().unwrap();
+        storage.init_schema().unwrap();
+
+        storage
+            .raw_connection()
+            .execute(
+                "INSERT INTO files (file_path, file_hash, last_modified, frontmatter_json) VALUES (?1, ?2, ?3, ?4)",
+                ("test.md", "hash_test", 1710000000i64, "{}"),
+            )
+            .unwrap();
+
+        let chunk = crate::models::IndexedChunk::new(
+            "test:0",
+            "test.md",
+            0,
+            "Implémentation du réseau neural et apprentissage automatique",
+            5,
+            crate::models::CoalaType::Semantic,
+            crate::models::NoteStatus::Active,
+            0,
+        );
+        storage.index_chunk(&chunk).unwrap();
+
+        let res = storage
+            .search_question("Comment configurer le réseau ?", 5)
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].file_path, "test.md");
+    }
 }
