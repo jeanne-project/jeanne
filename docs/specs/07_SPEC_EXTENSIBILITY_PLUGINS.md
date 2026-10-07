@@ -105,6 +105,11 @@ pub async fn execute_plugin_with_watchdog(
 
 ---
 
+### 3.3 Précisions d'implémentation (amendement Architecte, jalon 7)
+* `PluginError::SubprocessCrashed(exit_code)` est implémenté sous le nom `PluginError::ProcessFailed(Option<i32>, String)` (`None` si terminaison par signal, ex. SIGSEGV).
+* Le code `-32002` de TEST-07-03 désigne les documents corrompus renvoyés par le plugin PDF ; un crash du sous-processus est signalé côté cœur par `ProcessFailed`.
+* Le runner borne chaque ligne stdout à 8 Mo et utilise `kill_on_drop(true)` en plus du watchdog.
+
 ## 4. Acceptance Test Matrix (TDD Assertions)
 
 | Test ID | Objective | Inputs / Setup | Action | Expected Assertions |

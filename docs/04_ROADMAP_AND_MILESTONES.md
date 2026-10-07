@@ -16,7 +16,7 @@ Ce document consigne la séquence de développement obligatoire de **Jeanne**. C
 | **Jalon 4** | **Inférence Locale** | Bindings `llama.cpp` Vulkan pour modèle GGUF 3B + Déchargement RAM | < 4,5 Go | ✅ Validé & Clôturé (02/10/2026) |
 | **Jalon 5** | **Pipeline Vocal** | Interaction bidirectionnelle STT (Whisper) et TTS (Piper) débrayable | < 250 Mo (0 Mo repos / 12 Mo mesuré) | ✅ Validé & Clôturé (04/10/2026) |
 | **Jalon 6** | **Capture de Réunion** | Diarisation matérielle stéréo (Micro/WASAPI) + OCR diapositives + Seeking | < 100 Mo (capture, 12 Mo mesuré / 0 Mo repos) | ✅ Validé & Clôturé (06/10/2026) |
-| **Jalon 7** | **Système de Plugins** | Runner IPC JSON-RPC sur stdio + Plugin parser PDF autonome (Go) | Éphémère | À venir |
+| **Jalon 7** | **Système de Plugins** | Runner IPC JSON-RPC sur stdio + Plugin parser PDF autonome (Go) | Éphémère (8,6 Mo mesuré) | ✅ Validé & Clôturé (07/10/2026) |
 | **Jalon 8** | **Hardening & v1** | Évaluation sur Golden Dataset + Résolution de conflits + Packaging OS | < 100 Mo | À venir |
 
 ---

@@ -97,8 +97,7 @@ async fn test_07_01_pdf_parser_roundtrip() {
         .find_by_capability("document_parser")
         .expect("plugin pdf-parser doit être découvert");
     let Some(exe) = ensure_plugin_executable(manifest) else {
-        eprintln!("SKIP: compilateur go indisponible");
-        return;
+        panic!("binaire pdf-parser introuvable et `go` indisponible : lancer `just build-plugins`");
     };
 
     let dir = tempfile::tempdir().unwrap();
