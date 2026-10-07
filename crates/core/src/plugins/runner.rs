@@ -3,11 +3,14 @@
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tracing::{debug, error, warn};
 
 use super::models::{JsonRpcRequest, JsonRpcResponse, PluginError};
+
+/// Taille maximale d'une ligne NDJSON émise par un plugin (8 Mo).
+const MAX_LINE_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Exécute une commande JSON-RPC synchrone (request-response) sur un plugin avec Watchdog.
 pub async fn execute_json_rpc(
@@ -26,7 +29,9 @@ pub async fn execute_json_rpc(
     cmd.current_dir(working_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        // Garantit l'éradication du processus sur tous les chemins de sortie (erreurs `?`).
+        .kill_on_drop(true);
 
     let mut child = cmd.spawn().map_err(PluginError::Io)?;
 
@@ -59,13 +64,28 @@ pub async fn execute_json_rpc(
     drop(stdin); // Fermeture du tube stdin pour signaler EOF si le plugin est en on_demand
 
     // Surveillance Watchdog sur stdout
-    let stdout_reader = BufReader::new(stdout);
-    let mut lines = stdout_reader.lines();
+    let mut stdout_reader = BufReader::new(stdout);
 
     let wait_output = async {
         let mut last_response: Option<JsonRpcResponse> = None;
 
-        while let Some(line) = lines.next_line().await? {
+        loop {
+            // Lecture bornée : une ligne stdout ne peut dépasser MAX_LINE_BYTES (zéro buffer bloat).
+            let mut buf = Vec::new();
+            let n = (&mut stdout_reader)
+                .take(MAX_LINE_BYTES + 1)
+                .read_until(b'\n', &mut buf)
+                .await?;
+            if n == 0 {
+                break;
+            }
+            if buf.len() as u64 > MAX_LINE_BYTES {
+                return Err(PluginError::ProcessFailed(
+                    None,
+                    format!("ligne stdout supérieure à {MAX_LINE_BYTES} octets"),
+                ));
+            }
+            let line = String::from_utf8_lossy(&buf);
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;

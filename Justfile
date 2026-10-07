@@ -37,10 +37,11 @@ check-git-clean:
 
 # Compile les plugins autonomes Go s'ils sont présents
 build-plugins:
-    @mkdir -p plugins/embeddings/bin plugins/llm-runner/bin
+    @mkdir -p plugins/embeddings/bin plugins/llm-runner/bin plugins/pdf-parser/bin
     @if command -v go >/dev/null 2>&1; then \
         (cd plugins/embeddings && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/jeanne-embeddings .) && \
-        (cd plugins/llm-runner && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/jeanne-llm-runner .); \
+        (cd plugins/llm-runner && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/jeanne-llm-runner .) && \
+        (cd plugins/pdf-parser && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/pdf-parser .); \
     fi
 
 # Contrôles locaux déterministes obligatoires avant appel au Reviewer
