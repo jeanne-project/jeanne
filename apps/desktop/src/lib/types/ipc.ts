@@ -109,11 +109,21 @@ export interface IpcCommands {
   ask_vault(question: string): Promise<string>;
   toggle_voice_pipeline(active: boolean): Promise<boolean>;
   get_voice_status(): Promise<VoiceStatus>;
+  get_voice_config(): Promise<VoiceConfig>;
+  update_voice_config(config: VoiceConfig): Promise<VoiceConfig>;
   list_audio_devices(): Promise<AudioDevicesReport>;
   transcribe_pcm_chunk(samples: number[], sample_rate: number): Promise<string>;
   synthesize_text_to_audio(text: string): Promise<number[]>;
   fetch_remote_server_models(endpoint: string, api_key?: string | null): Promise<string[]>;
   is_inference_ready(): Promise<boolean>;
+}
+
+export interface VoiceConfig {
+  whisper_model_path?: string | null;
+  piper_model_path?: string | null;
+  selected_input_device?: string | null;
+  selected_output_device?: string | null;
+  remote_stt_endpoint?: string | null;
 }
 
 export type VoiceState = 'Idle' | 'Listening' | 'Transcribing' | 'Thinking' | 'Speaking' | 'Error';

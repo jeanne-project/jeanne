@@ -26,8 +26,8 @@ pub use plugins::{
 };
 pub use voice::{
     AudioDevice, AudioDevicesReport, AudioResampler, PiperTtsEngine, SentenceSplitter, SttEngine,
-    TtsEngine, VadConfig, VadDecision, VoiceActivityDetector, VoiceError, VoicePipeline,
-    VoiceState, VoiceStatus, WhisperSttEngine, get_audio_devices,
+    TtsEngine, VadConfig, VadDecision, VoiceActivityDetector, VoiceConfig, VoiceError,
+    VoicePipeline, VoiceState, VoiceStatus, WhisperSttEngine, get_audio_devices,
 };
 
 pub use model_discovery::{

@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import QuickAccess from './lib/components/QuickAccess.svelte';
-  import type { VaultStats, HardwareInfo, LocalInferenceStats, DiscoveredModel, LocalEngineConfig, ModelRecommendedParams, VoiceStatus, AudioDevicesReport } from './lib/types/ipc';
+  import type { VaultStats, HardwareInfo, LocalInferenceStats, DiscoveredModel, LocalEngineConfig, ModelRecommendedParams, VoiceStatus, AudioDevicesReport, VoiceConfig } from './lib/types/ipc';
 
   let windowLabel = $state('main');
   let coreVersion = $state('Chargement...');
@@ -11,10 +11,19 @@
   let inferenceStats = $state<LocalInferenceStats | null>(null);
   let isModelLoading = $state(false);
 
-  // Pipeline Vocal (Jalon 5)
+  // Pipeline Vocal (Jalon 5 / INC-07)
   let voiceStatus = $state<VoiceStatus | null>(null);
   let isVoiceToggling = $state(false);
   let audioDevices = $state<AudioDevicesReport | null>(null);
+  let voiceConfig = $state<VoiceConfig>({
+    whisper_model_path: null,
+    piper_model_path: null,
+    selected_input_device: null,
+    selected_output_device: null,
+    remote_stt_endpoint: null,
+  });
+  let isSavingVoiceConfig = $state(false);
+  let voiceConfigNotice = $state('');
 
   // Paramètres & Découverte Multi-Modèles
   let showSettingsModal = $state(false);
@@ -124,8 +133,30 @@
     try {
       voiceStatus = await invoke<VoiceStatus>('get_voice_status');
       audioDevices = await invoke<AudioDevicesReport>('list_audio_devices');
+      const cfg = await invoke<VoiceConfig>('get_voice_config');
+      if (cfg) {
+        voiceConfig = { ...cfg };
+      }
     } catch {
       // Ignoré si mode web pur
+    }
+  }
+
+  async function saveVoiceConfig() {
+    isSavingVoiceConfig = true;
+    voiceConfigNotice = '';
+    try {
+      const updated = await invoke<VoiceConfig>('update_voice_config', { config: voiceConfig });
+      voiceConfig = { ...updated };
+      voiceConfigNotice = '✓ Paramètres vocaux enregistrés avec succès !';
+      setTimeout(() => {
+        voiceConfigNotice = '';
+      }, 4000);
+    } catch (e) {
+      console.error('Erreur enregistrement paramètres vocaux', e);
+      voiceConfigNotice = `Erreur : ${String(e)}`;
+    } finally {
+      isSavingVoiceConfig = false;
     }
   }
 
@@ -342,9 +373,11 @@
     modelLoadError = '';
     configSavedMessage = '';
     recommendedSuccessNotice = '';
+    voiceConfigNotice = '';
     loadModelsList();
     loadEngineConfig();
     refreshHardware();
+    refreshVoice();
   }
 
   async function copyModelsDirectory() {
@@ -655,12 +688,12 @@
 
         <div class="stats-cards">
           <div class="stat-card">
-            <span class="stat-label">Microphone Détecté</span>
-            <span class="stat-value">{audioDevices?.default_input_name ?? 'Microphone Système'}</span>
+            <span class="stat-label">Microphone Actif</span>
+            <span class="stat-value">{voiceConfig.selected_input_device || audioDevices?.default_input_name || 'Microphone Système'}</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">Sortie Audio TTS</span>
-            <span class="stat-value">{audioDevices?.default_output_name ?? 'Haut-parleur Système'}</span>
+            <span class="stat-value">{voiceConfig.selected_output_device || audioDevices?.default_output_name || 'Haut-parleur Système'}</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">Latence Synthèse (TTFB)</span>
@@ -669,6 +702,89 @@
           <div class="stat-card">
             <span class="stat-label">Empreinte RAM Vocale</span>
             <span class="stat-value">{voiceStatus?.memory_allocated_mb ?? 0} Mo</span>
+          </div>
+        </div>
+
+        <!-- Paramétrage Audio & Modèles Vocaux (INC-07) -->
+        <div class="voice-config-container" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+          <h3 style="margin-top: 0; margin-bottom: 0.75rem; font-size: 0.95rem; color: #a5b4fc;">⚙️ Configuration Audio & Modèles Vocaux</h3>
+          <div class="adv-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+            <div class="adv-field">
+              <label for="voice-mic-select" class="adv-label" style="display: block; font-size: 0.85rem; margin-bottom: 0.35rem; color: #cbd5e1;">🎤 Microphone d'entrée :</label>
+              <select
+                id="voice-mic-select"
+                class="adv-select"
+                style="width: 100%; padding: 0.45rem 0.6rem; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 6px;"
+                bind:value={voiceConfig.selected_input_device}
+                onchange={saveVoiceConfig}
+              >
+                <option value={null}>Microphone par défaut ({audioDevices?.default_input_name ?? 'Système'})</option>
+                {#if audioDevices?.input_devices}
+                  {#each audioDevices.input_devices as dev}
+                    <option value={dev.name}>{dev.name} {dev.is_default ? '(par défaut)' : ''}</option>
+                  {/each}
+                {/if}
+              </select>
+            </div>
+
+            <div class="adv-field">
+              <label for="voice-speaker-select" class="adv-label" style="display: block; font-size: 0.85rem; margin-bottom: 0.35rem; color: #cbd5e1;">🔊 Sortie audio (Haut-parleur) :</label>
+              <select
+                id="voice-speaker-select"
+                class="adv-select"
+                style="width: 100%; padding: 0.45rem 0.6rem; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 6px;"
+                bind:value={voiceConfig.selected_output_device}
+                onchange={saveVoiceConfig}
+              >
+                <option value={null}>Sortie par défaut ({audioDevices?.default_output_name ?? 'Système'})</option>
+                {#if audioDevices?.output_devices}
+                  {#each audioDevices.output_devices as dev}
+                    <option value={dev.name}>{dev.name} {dev.is_default ? '(par défaut)' : ''}</option>
+                  {/each}
+                {/if}
+              </select>
+            </div>
+
+            <div class="adv-field">
+              <label for="voice-whisper-model" class="adv-label" style="display: block; font-size: 0.85rem; margin-bottom: 0.35rem; color: #cbd5e1;">🧠 Modèle Whisper STT (.bin) :</label>
+              <input
+                id="voice-whisper-model"
+                type="text"
+                class="adv-input"
+                style="width: 100%; padding: 0.45rem 0.6rem; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 6px;"
+                placeholder="ex: /path/to/ggml-base.bin (optionnel)"
+                bind:value={voiceConfig.whisper_model_path}
+                onchange={saveVoiceConfig}
+              />
+            </div>
+
+            <div class="adv-field">
+              <label for="voice-piper-model" class="adv-label" style="display: block; font-size: 0.85rem; margin-bottom: 0.35rem; color: #cbd5e1;">🗣️ Modèle Piper TTS (.onnx) :</label>
+              <input
+                id="voice-piper-model"
+                type="text"
+                class="adv-input"
+                style="width: 100%; padding: 0.45rem 0.6rem; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 6px;"
+                placeholder="ex: /path/to/fr_FR-siwis-medium.onnx (optionnel)"
+                bind:value={voiceConfig.piper_model_path}
+                onchange={saveVoiceConfig}
+              />
+            </div>
+          </div>
+
+          <div style="margin-top: 0.75rem; display: flex; align-items: center; justify-content: space-between;">
+            <button
+              type="button"
+              class="btn-sm btn-primary"
+              style="padding: 0.35rem 0.75rem; font-size: 0.85rem;"
+              onclick={saveVoiceConfig}
+              disabled={isSavingVoiceConfig}
+            >
+              {isSavingVoiceConfig ? 'Enregistrement...' : '💾 Sauvegarder les paramètres vocaux'}
+            </button>
+            {#if voiceConfigNotice}
+              <span style="font-size: 0.85rem; color: #4ade80;">{voiceConfigNotice}</span>
+            {/if}
           </div>
         </div>
 
@@ -1320,6 +1436,88 @@
               </div>
             </div>
           </details>
+        </section>
+
+        <!-- Section 4b : Configuration Vocale & Périphériques Audio (INC-07) -->
+        <section class="settings-section voice-settings-modal">
+          <h3 class="settings-subtitle">🎙️ Configuration Vocale &amp; Périphériques Audio</h3>
+          <div class="adv-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 0.75rem;">
+            <div class="adv-field">
+              <label for="settings-voice-mic" class="adv-label">Microphone d'entrée</label>
+              <select
+                id="settings-voice-mic"
+                class="adv-select"
+                bind:value={voiceConfig.selected_input_device}
+                onchange={saveVoiceConfig}
+              >
+                <option value={null}>Microphone par défaut ({audioDevices?.default_input_name ?? 'Système'})</option>
+                {#if audioDevices?.input_devices}
+                  {#each audioDevices.input_devices as dev}
+                    <option value={dev.name}>{dev.name} {dev.is_default ? '(par défaut)' : ''}</option>
+                  {/each}
+                {/if}
+              </select>
+              <span class="adv-hint">Périphérique de capture pour la transcription STT.</span>
+            </div>
+
+            <div class="adv-field">
+              <label for="settings-voice-speaker" class="adv-label">Sortie audio (Haut-parleur)</label>
+              <select
+                id="settings-voice-speaker"
+                class="adv-select"
+                bind:value={voiceConfig.selected_output_device}
+                onchange={saveVoiceConfig}
+              >
+                <option value={null}>Sortie par défaut ({audioDevices?.default_output_name ?? 'Système'})</option>
+                {#if audioDevices?.output_devices}
+                  {#each audioDevices.output_devices as dev}
+                    <option value={dev.name}>{dev.name} {dev.is_default ? '(par défaut)' : ''}</option>
+                  {/each}
+                {/if}
+              </select>
+              <span class="adv-hint">Périphérique de restitution pour la synthèse vocale TTS.</span>
+            </div>
+
+            <div class="adv-field">
+              <label for="settings-whisper-model" class="adv-label">Chemin du modèle Whisper (.bin)</label>
+              <input
+                id="settings-whisper-model"
+                type="text"
+                class="adv-input"
+                placeholder="ex: /path/to/ggml-base.bin (optionnel)"
+                bind:value={voiceConfig.whisper_model_path}
+                onchange={saveVoiceConfig}
+              />
+              <span class="adv-hint">Modèle STT Whisper local pour la transcription vocale.</span>
+            </div>
+
+            <div class="adv-field">
+              <label for="settings-piper-model" class="adv-label">Chemin du modèle Piper (.onnx)</label>
+              <input
+                id="settings-piper-model"
+                type="text"
+                class="adv-input"
+                placeholder="ex: /path/to/fr_FR-siwis-medium.onnx (optionnel)"
+                bind:value={voiceConfig.piper_model_path}
+                onchange={saveVoiceConfig}
+              />
+              <span class="adv-hint">Modèle ONNX pour la synthèse vocale Piper.</span>
+            </div>
+          </div>
+
+          <div style="margin-top: 0.75rem; display: flex; align-items: center; justify-content: space-between;">
+            <button
+              type="button"
+              class="btn-sm btn-primary"
+              onclick={saveVoiceConfig}
+              disabled={isSavingVoiceConfig}
+            >
+              {isSavingVoiceConfig ? 'Enregistrement...' : '💾 Sauvegarder les paramètres vocaux'}
+            </button>
+            {#if voiceConfigNotice}
+              <span style="font-size: 0.85rem; color: #4ade80;">{voiceConfigNotice}</span>
+            {/if}
+          </div>
         </section>
 
         <!-- Section 5 : Diagnostic Matériel & Conseils RAM -->

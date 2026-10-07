@@ -713,6 +713,135 @@ impl MeetingNoteGenerator {
 
         doc
     }
+
+    /// Construit le prompt structuré d'inférence LLM pour la synthèse de réunion.
+    pub fn build_meeting_summary_prompt(session: &MeetingSession) -> String {
+        let mut transcript = String::new();
+        if session.segments.is_empty() {
+            transcript.push_str("(Aucune intervention vocale enregistrée)\n");
+        } else {
+            for seg in &session.segments {
+                let time_str = Self::format_timestamp(seg.seek_seconds);
+                transcript.push_str(&format!("[{time_str}] {}: {}\n", seg.speaker, seg.text));
+            }
+        }
+
+        let mut slides_info = String::new();
+        if !session.slides.is_empty() {
+            slides_info.push_str(&format!(
+                "Diapositives capturées ({} au total) :\n",
+                session.slides.len()
+            ));
+            for slide in &session.slides {
+                let time_str = Self::format_timestamp(slide.timestamp_ms / 1000);
+                slides_info.push_str(&format!("- [{time_str}] {}\n", slide.file_name));
+            }
+        }
+
+        format!(
+            "Tu es un assistant exécutif expert en compte-rendu de réunions.\n\
+            Analyse la transcription ci-dessous et produis une synthèse claire et rigoureuse en français.\n\n\
+            INFORMATIONS :\n\
+            - Titre : {}\n\
+            - Durée : {} s\n\
+            {}\n\
+            TRANSCRIPTION :\n\
+            {}\n\n\
+            CONSIGNES FORMAT STRICT :\n\
+            Rédige UNIQUEMENT les trois sections suivantes au format Markdown exact :\n\n\
+            ## Synthèse Exécutive\n\
+            (Résumé percutant de 3 à 5 phrases du contexte, des échanges et des conclusions.)\n\n\
+            ## Décisions Clés\n\
+            (Liste à puces des décisions prises.)\n\n\
+            ## Actions à Mener (ToDo)\n\
+            (Liste à puces des actions au format `- [ ] Action @Responsable` ou `- [ ] Action`.)\n\n\
+            Ne produis aucune formule d'introduction ou de politesse.",
+            session.title,
+            session.duration_seconds,
+            slides_info,
+            transcript.trim()
+        )
+    }
+
+    /// Injecte la synthèse IA au sein de la note Markdown sans altérer le frontmatter YAML.
+    /// La synthèse est insérée avant "## Diapositives Clés" ou "## Transcription & Diarisation".
+    pub fn inject_ai_summary_into_note(raw_markdown: &str, summary_content: &str) -> String {
+        let clean_summary = summary_content.trim();
+        if clean_summary.is_empty() {
+            return raw_markdown.to_string();
+        }
+
+        // Séparation du frontmatter YAML s'il existe
+        let (frontmatter, body) = if let Some(stripped) = raw_markdown.strip_prefix("---\n") {
+            if let Some(end_fm) = stripped.find("\n---\n") {
+                let split_idx = 4 + end_fm + 5; // index après le second `---\n`
+                (&raw_markdown[..split_idx], &raw_markdown[split_idx..])
+            } else if let Some(end_fm) = stripped.find("\n---") {
+                let split_idx = 4 + end_fm + 4;
+                (&raw_markdown[..split_idx], &raw_markdown[split_idx..])
+            } else {
+                ("", raw_markdown)
+            }
+        } else {
+            ("", raw_markdown)
+        };
+
+        // Si le corps contient déjà une synthèse exécutive, on la remplace
+        if let Some(summary_idx) = body.find("## Synthèse Exécutive") {
+            let before_summary = &body[..summary_idx];
+            let after_summary_part = &body[summary_idx..];
+
+            // Chercher la prochaine section majeure qui n'est pas une sous-section de la synthèse
+            let next_section_idx = after_summary_part
+                .find("\n## Diapositives Clés")
+                .or_else(|| after_summary_part.find("\n## Transcription & Diarisation"));
+
+            let after_summary = if let Some(next_idx) = next_section_idx {
+                &after_summary_part[next_idx..]
+            } else {
+                ""
+            };
+
+            return format!(
+                "{}{}{}\n\n{}\n{}",
+                frontmatter,
+                before_summary.trim_end(),
+                if before_summary.trim_end().is_empty() {
+                    ""
+                } else {
+                    "\n\n"
+                },
+                clean_summary,
+                after_summary.trim_start()
+            );
+        }
+
+        // Recherche du point d'insertion privilégié
+        let target_heading = if body.contains("\n## Diapositives Clés") {
+            Some("\n## Diapositives Clés")
+        } else if body.contains("\n## Transcription & Diarisation") {
+            Some("\n## Transcription & Diarisation")
+        } else {
+            None
+        };
+
+        if let Some(target) = target_heading {
+            if let Some(idx) = body.find(target) {
+                let before = body[..idx].trim_end();
+                let after = &body[idx..];
+                return format!(
+                    "{}{}\n\n{}\n\n{}",
+                    frontmatter,
+                    before,
+                    clean_summary,
+                    after.trim_start_matches('\n')
+                );
+            }
+        }
+
+        // Repli : insertion en fin de corps
+        format!("{}{}\n\n{}", frontmatter, body.trim_end(), clean_summary)
+    }
 }
 
 // ============================================================================
@@ -725,6 +854,7 @@ pub struct MeetingRecorder {
     current_session: Arc<Mutex<Option<MeetingSession>>>,
     spooler: Arc<Mutex<Option<DualTrackSpooler>>>,
     slide_detector: Arc<Mutex<Option<SlideDetector>>>,
+    last_session: Arc<Mutex<Option<MeetingSession>>>,
     temp_dir: PathBuf,
     vault_path: PathBuf,
 }
@@ -737,6 +867,7 @@ impl MeetingRecorder {
             current_session: Arc::new(Mutex::new(None)),
             spooler: Arc::new(Mutex::new(None)),
             slide_detector: Arc::new(Mutex::new(None)),
+            last_session: Arc::new(Mutex::new(None)),
             temp_dir,
             vault_path,
         }
@@ -881,7 +1012,13 @@ impl MeetingRecorder {
         state.sys_level_db = -100.0;
         state.slides_detected = 0;
 
+        *self.last_session.lock().await = Some(session);
+
         Ok(summary)
+    }
+
+    pub async fn get_last_session(&self) -> Option<MeetingSession> {
+        self.last_session.lock().await.clone()
     }
 
     pub async fn feed_synthetic_frame(
@@ -1052,5 +1189,193 @@ impl MeetingRecorder {
         }
 
         Ok(recovered)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_meeting_summary_prompt() {
+        let session = MeetingSession {
+            id: "test-sess-1".to_string(),
+            title: "Revue de Sprint 42".to_string(),
+            start_time: Utc::now(),
+            end_time: Some(Utc::now()),
+            duration_seconds: 120,
+            mic_file_path: PathBuf::new(),
+            sys_file_path: PathBuf::new(),
+            output_note_path: None,
+            segments: vec![
+                TranscriptSegment {
+                    id: "seg-1".to_string(),
+                    start_ms: 0,
+                    end_ms: 5000,
+                    speaker: SpeakerTag::Me,
+                    text: "Bonjour à tous, commençons la revue de sprint.".to_string(),
+                    seek_seconds: 0,
+                },
+                TranscriptSegment {
+                    id: "seg-2".to_string(),
+                    start_ms: 6000,
+                    end_ms: 12000,
+                    speaker: SpeakerTag::Remote,
+                    text: "Les tests d'intégration sont tous au vert.".to_string(),
+                    seek_seconds: 6,
+                },
+            ],
+            slides: vec![SlideKeyframe {
+                timestamp_ms: 6000,
+                file_name: "slide_test.jpg".to_string(),
+                relative_path: "Attachments/Slides/slide_test.jpg".to_string(),
+                phash: 12345,
+                hamming_dist_pct: 0.5,
+                ocr_text: None,
+            }],
+        };
+
+        let prompt = MeetingNoteGenerator::build_meeting_summary_prompt(&session);
+        assert!(prompt.contains("Revue de Sprint 42"));
+        assert!(prompt.contains("## Synthèse Exécutive"));
+        assert!(prompt.contains("## Décisions Clés"));
+        assert!(prompt.contains("## Actions à Mener (ToDo)"));
+        assert!(prompt.contains("Bonjour à tous, commençons la revue de sprint."));
+        assert!(prompt.contains("Les tests d'intégration sont tous au vert."));
+        assert!(prompt.contains("slide_test.jpg"));
+    }
+
+    #[test]
+    fn test_inject_ai_summary_into_note_with_slides() {
+        let raw_md = r#"---
+id: sess-100
+title: "Compte-rendu - Architecture"
+date_creation: "2026-10-07T10:00:00Z"
+date_modification: "2026-10-07T10:30:00Z"
+note_type: episodique
+statut: actif
+tags:
+  - reunion
+  - diarisation
+---
+
+# Compte-rendu - Architecture
+
+- **Date** : 2026-10-07 10:00 UTC
+- **Durée** : 1800 s (30 min)
+- **Diapositives capturées** : 1
+
+## Diapositives Clés
+- [[00:05]](seek:5) ![Slide](Attachments/Slides/slide_1.jpg)
+
+## Transcription & Diarisation
+- [[00:05]](seek:5) **[Me]** : Discussion technique
+"#;
+
+        let summary = r#"## Synthèse Exécutive
+La réunion a permis de finaliser les choix d'architecture pour le moteur vocal et les résumés.
+
+## Décisions Clés
+- Adoption de VoiceConfig dans crates/core.
+
+## Actions à Mener (ToDo)
+- [ ] Valider les tests d'intégration @Lead"#;
+
+        let enriched = MeetingNoteGenerator::inject_ai_summary_into_note(raw_md, summary);
+
+        // Vérifier préservation du frontmatter
+        assert!(enriched.starts_with("---\nid: sess-100\n"));
+        assert!(enriched.contains("tags:\n  - reunion\n  - diarisation\n---"));
+
+        // Vérifier positionnement : la synthèse doit être AVANT Diapositives Clés
+        let summary_pos = enriched
+            .find("## Synthèse Exécutive")
+            .expect("Synthèse absente");
+        let slides_pos = enriched
+            .find("## Diapositives Clés")
+            .expect("Slides absents");
+        let transcription_pos = enriched
+            .find("## Transcription & Diarisation")
+            .expect("Transcription absente");
+
+        assert!(summary_pos < slides_pos);
+        assert!(slides_pos < transcription_pos);
+        assert!(enriched.contains("- [ ] Valider les tests d'intégration @Lead"));
+    }
+
+    #[test]
+    fn test_inject_ai_summary_into_note_without_slides() {
+        let raw_md = r#"---
+id: sess-200
+title: "Compte-rendu - Standup"
+---
+
+# Compte-rendu - Standup
+
+- **Date** : 2026-10-07 09:00 UTC
+- **Durée** : 600 s (10 min)
+- **Diapositives capturées** : 0
+
+## Transcription & Diarisation
+- [[00:01]](seek:1) **[Me]** : Standup matinal
+"#;
+
+        let summary = r#"## Synthèse Exécutive
+Point d'avancement rapide de l'équipe.
+
+## Décisions Clés
+- Poursuite des tâches du sprint.
+
+## Actions à Mener (ToDo)
+- [ ] Relecture PR"#;
+
+        let enriched = MeetingNoteGenerator::inject_ai_summary_into_note(raw_md, summary);
+
+        let summary_pos = enriched
+            .find("## Synthèse Exécutive")
+            .expect("Synthèse absente");
+        let trans_pos = enriched
+            .find("## Transcription & Diarisation")
+            .expect("Transcription absente");
+
+        assert!(summary_pos < trans_pos);
+        assert!(enriched.contains("## Actions à Mener (ToDo)"));
+    }
+
+    #[test]
+    fn test_inject_ai_summary_replaces_existing_summary() {
+        let raw_md = r#"---
+id: sess-300
+---
+
+# Compte-rendu - Test
+
+## Synthèse Exécutive
+Ancien résumé obsolète.
+
+## Décisions Clés
+- Ancienne décision
+
+## Actions à Mener (ToDo)
+- [ ] Ancienne action
+
+## Transcription & Diarisation
+- [[00:01]](seek:1) **[Me]** : Discussion
+"#;
+
+        let new_summary = r#"## Synthèse Exécutive
+Nouveau résumé à jour.
+
+## Décisions Clés
+- Nouvelle décision
+
+## Actions à Mener (ToDo)
+- [ ] Nouvelle action @Dev"#;
+
+        let updated = MeetingNoteGenerator::inject_ai_summary_into_note(raw_md, new_summary);
+
+        assert!(!updated.contains("Ancien résumé obsolète"));
+        assert!(updated.contains("Nouveau résumé à jour"));
+        assert!(updated.contains("## Transcription & Diarisation"));
     }
 }

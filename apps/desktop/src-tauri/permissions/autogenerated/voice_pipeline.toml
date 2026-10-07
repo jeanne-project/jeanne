@@ -49,3 +49,24 @@ commands.allow = ["synthesize_text_to_audio"]
 identifier = "deny-synthesize-text-to-audio"
 description = "Denies synthesize_text_to_audio command."
 commands.deny = ["synthesize_text_to_audio"]
+
+[[permission]]
+identifier = "allow-get-voice-config"
+description = "Enables get_voice_config command."
+commands.allow = ["get_voice_config"]
+
+[[permission]]
+identifier = "deny-get-voice-config"
+description = "Denies get_voice_config command."
+commands.deny = ["get_voice_config"]
+
+[[permission]]
+identifier = "allow-update-voice-config"
+description = "Enables update_voice_config command."
+commands.allow = ["update_voice_config"]
+
+[[permission]]
+identifier = "deny-update-voice-config"
+description = "Denies update_voice_config command."
+commands.deny = ["update_voice_config"]
+

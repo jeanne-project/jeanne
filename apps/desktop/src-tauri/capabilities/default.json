@@ -35,6 +35,8 @@
     "allow-update-local-engine-config",
     "allow-toggle-voice-pipeline",
     "allow-get-voice-status",
+    "allow-get-voice-config",
+    "allow-update-voice-config",
     "allow-list-audio-devices",
     "allow-transcribe-pcm-chunk",
     "allow-synthesize-text-to-audio",

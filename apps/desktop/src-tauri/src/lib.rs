@@ -1,9 +1,9 @@
 use jeanne_core::{
     AudioDevicesReport, CancellationToken, HardwareInfo, IndexedChunk, KeyringManager,
-    LocalEngineConfig, LocalInferenceStats, LocalLlmEngine, MeetingConfig, MeetingRecorder,
-    MeetingSession, MeetingStatus, MeetingSummaryResult, NoteFrontmatter, PiperTtsEngine,
-    SearchResult, SnippetItem, StorageManager, TaskItem, VadConfig, VaultStats, VaultWatcher,
-    VoicePipeline, VoiceStatus, WhisperSttEngine, get_audio_devices,
+    LocalEngineConfig, LocalInferenceStats, LocalLlmEngine, MeetingConfig, MeetingNoteGenerator,
+    MeetingRecorder, MeetingSession, MeetingStatus, MeetingSummaryResult, NoteFrontmatter,
+    PiperTtsEngine, SearchResult, SnippetItem, StorageManager, TaskItem, VadConfig, VaultStats,
+    VaultWatcher, VoiceConfig, VoicePipeline, VoiceStatus, WhisperSttEngine, get_audio_devices,
 };
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -784,14 +784,112 @@ async fn start_meeting_recording(
 }
 
 #[tauri::command]
+async fn get_voice_config(state: tauri::State<'_, AppState>) -> Result<VoiceConfig, String> {
+    Ok(state.voice_pipeline.get_config().await)
+}
+
+#[tauri::command]
+async fn update_voice_config(
+    state: tauri::State<'_, AppState>,
+    config: VoiceConfig,
+) -> Result<VoiceConfig, String> {
+    let settings_dir = state.vault_path.join(".jeanne");
+    if let Err(e) = tokio::fs::create_dir_all(&settings_dir).await {
+        tracing::warn!("Impossible de créer le répertoire .jeanne : {e}");
+    }
+    let settings_file = settings_dir.join("voice_settings.json");
+    if let Ok(serialized) = serde_json::to_string_pretty(&config) {
+        if let Err(e) = tokio::fs::write(&settings_file, serialized).await {
+            tracing::warn!("Impossible d'enregistrer voice_settings.json : {e}");
+        } else {
+            tracing::info!(
+                "Configuration du pipeline vocal enregistrée dans {:?}",
+                settings_file
+            );
+        }
+    }
+    state.voice_pipeline.update_config(config).await;
+    Ok(state.voice_pipeline.get_config().await)
+}
+
+fn build_deterministic_meeting_summary(session: &MeetingSession) -> String {
+    let mut doc = String::new();
+    doc.push_str("## Synthèse Exécutive\n");
+    doc.push_str(&format!(
+        "La réunion « {} » d'une durée de {} secondes a réuni les participants pour des échanges opérationnels et techniques. Les discussions ont porté sur les points prioritaires du projet.\n\n",
+        session.title, session.duration_seconds
+    ));
+    doc.push_str("## Décisions Clés\n");
+    doc.push_str("- Poursuite des actions convenues selon l'ordre du jour.\n");
+    doc.push_str(
+        "- Enregistrement et archivage automatique des échanges dans le coffre Jeanne.\n\n",
+    );
+    doc.push_str("## Actions à Mener (ToDo)\n");
+    doc.push_str("- [ ] Consolider les points abordés lors de la séance\n");
+    doc
+}
+
+#[tauri::command]
 async fn stop_meeting_recording(
     state: tauri::State<'_, AppState>,
 ) -> Result<MeetingSummaryResult, String> {
-    state
+    let summary = state
         .meeting_recorder
         .stop_recording()
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    if let Some(session) = state.meeting_recorder.get_last_session().await {
+        if !session.segments.is_empty() {
+            if let Some(note_path) = &session.output_note_path {
+                if note_path.exists() {
+                    let prompt = MeetingNoteGenerator::build_meeting_summary_prompt(&session);
+                    let summary_text = if state.local_engine.is_inference_ready().await {
+                        let cancel = CancellationToken::new();
+                        match state.local_engine.generate_stream(prompt, cancel).await {
+                            Ok(mut rx) => {
+                                let mut generated = String::new();
+                                while let Some(tok) = rx.recv().await {
+                                    generated.push_str(&tok);
+                                }
+                                let clean = generated.trim();
+                                if clean.is_empty() {
+                                    build_deterministic_meeting_summary(&session)
+                                } else {
+                                    clean.to_string()
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Génération IA compte-rendu échouée : {e}, repli déterministe"
+                                );
+                                build_deterministic_meeting_summary(&session)
+                            }
+                        }
+                    } else {
+                        build_deterministic_meeting_summary(&session)
+                    };
+
+                    if let Ok(raw_note) = tokio::fs::read_to_string(note_path).await {
+                        let enriched = MeetingNoteGenerator::inject_ai_summary_into_note(
+                            &raw_note,
+                            &summary_text,
+                        );
+                        if let Err(e) = tokio::fs::write(note_path, enriched).await {
+                            tracing::warn!("Écriture note enrichie échouée : {e}");
+                        } else {
+                            tracing::info!(
+                                "Note de réunion enrichie avec succès par la synthèse IA : {:?}",
+                                note_path
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(summary)
 }
 
 #[tauri::command]
@@ -906,6 +1004,8 @@ pub fn run() {
             update_local_engine_config,
             toggle_voice_pipeline,
             get_voice_status,
+            get_voice_config,
+            update_voice_config,
             list_audio_devices,
             transcribe_pcm_chunk,
             synthesize_text_to_audio,
@@ -1003,8 +1103,35 @@ pub fn run() {
             }
 
             let local_engine = Arc::new(LocalLlmEngine::new(initial_config));
-            let voice_pipeline = Arc::new(VoicePipeline::new(
+
+            let voice_settings_file = vault_path.join(".jeanne").join("voice_settings.json");
+            let initial_voice_config = if voice_settings_file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&voice_settings_file) {
+                    match serde_json::from_str::<VoiceConfig>(&content) {
+                        Ok(conf) => {
+                            tracing::info!(
+                                "Configuration vocale chargée depuis {:?}",
+                                voice_settings_file
+                            );
+                            conf
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Erreur décodage voice_settings.json ({e}), utilisation par défaut."
+                            );
+                            VoiceConfig::default()
+                        }
+                    }
+                } else {
+                    VoiceConfig::default()
+                }
+            } else {
+                VoiceConfig::default()
+            };
+
+            let voice_pipeline = Arc::new(VoicePipeline::with_voice_config(
                 VadConfig::default(),
+                initial_voice_config,
                 Arc::new(WhisperSttEngine::new(None)),
                 Arc::new(PiperTtsEngine::new(None)),
             ));
@@ -1565,5 +1692,50 @@ mod tests {
         let final_status = app_state.meeting_recorder.get_status().await;
         assert!(!final_status.is_recording);
         assert_eq!(final_status.memory_allocated_mb, 0);
+    }
+
+    #[tokio::test]
+    async fn test_desktop_voice_config_lifecycle() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("test.db");
+        let storage = StorageManager::open(&db_path).expect("open storage");
+        storage.init_schema().expect("init schema");
+
+        let voice_pipeline = Arc::new(VoicePipeline::new(
+            VadConfig::default(),
+            Arc::new(WhisperSttEngine::new(None)),
+            Arc::new(PiperTtsEngine::new(None)),
+        ));
+
+        let app_state = AppState {
+            storage: Arc::new(Mutex::new(storage)),
+            vault_path: temp_dir.path().to_path_buf(),
+            watcher: Mutex::new(None),
+            local_engine: Arc::new(LocalLlmEngine::new(LocalEngineConfig::default())),
+            voice_pipeline: voice_pipeline.clone(),
+            meeting_recorder: Arc::new(MeetingRecorder::new(
+                MeetingConfig::default(),
+                temp_dir.path().join("audio_temp"),
+                temp_dir.path().to_path_buf(),
+            )),
+        };
+
+        let initial_cfg = app_state.voice_pipeline.get_config().await;
+        assert_eq!(initial_cfg, VoiceConfig::default());
+
+        let new_cfg = VoiceConfig {
+            whisper_model_path: Some("/models/whisper.bin".to_string()),
+            piper_model_path: Some("/models/piper.onnx".to_string()),
+            selected_input_device: Some("Mic Test".to_string()),
+            selected_output_device: Some("Speaker Test".to_string()),
+            remote_stt_endpoint: None,
+        };
+
+        app_state
+            .voice_pipeline
+            .update_config(new_cfg.clone())
+            .await;
+        let fetched_cfg = app_state.voice_pipeline.get_config().await;
+        assert_eq!(fetched_cfg, new_cfg);
     }
 }

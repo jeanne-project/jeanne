@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait};
 use rubato::{FastFixedIn, PolynomialDegree, Resampler};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
 
 // ============================================================================
@@ -24,6 +24,21 @@ pub struct AudioDevicesReport {
     pub output_devices: Vec<AudioDevice>,
     pub default_input_name: Option<String>,
     pub default_output_name: Option<String>,
+}
+
+// ============================================================================
+// 1b. Configuration Vocale (VoiceConfig)
+// ============================================================================
+
+/// Configuration du pipeline vocal (modèles STT/TTS, périphériques audio sélectionnés, endpoint distant).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct VoiceConfig {
+    pub whisper_model_path: Option<String>,
+    pub piper_model_path: Option<String>,
+    pub selected_input_device: Option<String>,
+    pub selected_output_device: Option<String>,
+    pub remote_stt_endpoint: Option<String>,
 }
 
 /// Énumère les périphériques audio du système via cpal avec repli gracieux
@@ -513,20 +528,40 @@ impl SentenceSplitter {
 #[async_trait]
 pub trait SttEngine: Send + Sync {
     async fn transcribe(&self, pcm_16k: &[f32]) -> Result<String, VoiceError>;
+    fn set_model_path(&self, _path: Option<String>) {}
+    fn model_path(&self) -> Option<String> {
+        None
+    }
 }
 
 #[async_trait]
 pub trait TtsEngine: Send + Sync {
     async fn synthesize_sentence(&self, sentence: &str) -> Result<Vec<f32>, VoiceError>;
+    fn set_model_path(&self, _path: Option<String>) {}
+    fn model_path(&self) -> Option<String> {
+        None
+    }
 }
 
 pub struct WhisperSttEngine {
-    pub model_path: Option<String>,
+    pub model_path: RwLock<Option<String>>,
 }
 
 impl WhisperSttEngine {
     pub fn new(model_path: Option<String>) -> Self {
-        Self { model_path }
+        Self {
+            model_path: RwLock::new(model_path),
+        }
+    }
+
+    pub fn set_model_path(&self, path: Option<String>) {
+        if let Ok(mut lock) = self.model_path.write() {
+            *lock = path;
+        }
+    }
+
+    pub fn model_path(&self) -> Option<String> {
+        self.model_path.read().ok().and_then(|g| g.clone())
     }
 }
 
@@ -539,15 +574,35 @@ impl SttEngine for WhisperSttEngine {
         // Transcription hors-ligne déterministe pour tests et exécution locale
         Ok("Transcription vocale réussie".to_string())
     }
+
+    fn set_model_path(&self, path: Option<String>) {
+        self.set_model_path(path);
+    }
+
+    fn model_path(&self) -> Option<String> {
+        self.model_path()
+    }
 }
 
 pub struct PiperTtsEngine {
-    pub voice_model_path: Option<String>,
+    pub voice_model_path: RwLock<Option<String>>,
 }
 
 impl PiperTtsEngine {
     pub fn new(voice_model_path: Option<String>) -> Self {
-        Self { voice_model_path }
+        Self {
+            voice_model_path: RwLock::new(voice_model_path),
+        }
+    }
+
+    pub fn set_voice_model_path(&self, path: Option<String>) {
+        if let Ok(mut lock) = self.voice_model_path.write() {
+            *lock = path;
+        }
+    }
+
+    pub fn voice_model_path(&self) -> Option<String> {
+        self.voice_model_path.read().ok().and_then(|g| g.clone())
     }
 }
 
@@ -565,6 +620,14 @@ impl TtsEngine for PiperTtsEngine {
             .collect();
         Ok(audio)
     }
+
+    fn set_model_path(&self, path: Option<String>) {
+        self.set_voice_model_path(path);
+    }
+
+    fn model_path(&self) -> Option<String> {
+        self.voice_model_path()
+    }
 }
 
 // ============================================================================
@@ -575,18 +638,66 @@ pub struct VoicePipeline {
     #[allow(unused)]
     config: VadConfig,
     state: Arc<Mutex<VoiceStatus>>,
+    voice_config: Arc<Mutex<VoiceConfig>>,
     stt: Arc<dyn SttEngine>,
     tts: Arc<dyn TtsEngine>,
 }
 
 impl VoicePipeline {
     pub fn new(config: VadConfig, stt: Arc<dyn SttEngine>, tts: Arc<dyn TtsEngine>) -> Self {
+        let voice_config = VoiceConfig {
+            whisper_model_path: stt.model_path(),
+            piper_model_path: tts.model_path(),
+            ..Default::default()
+        };
         Self {
             config,
             state: Arc::new(Mutex::new(VoiceStatus::default())),
+            voice_config: Arc::new(Mutex::new(voice_config)),
             stt,
             tts,
         }
+    }
+
+    pub fn with_voice_config(
+        config: VadConfig,
+        voice_config: VoiceConfig,
+        stt: Arc<dyn SttEngine>,
+        tts: Arc<dyn TtsEngine>,
+    ) -> Self {
+        stt.set_model_path(voice_config.whisper_model_path.clone());
+        tts.set_model_path(voice_config.piper_model_path.clone());
+        let status = VoiceStatus {
+            active_device_name: voice_config.selected_input_device.clone(),
+            ..Default::default()
+        };
+        Self {
+            config,
+            state: Arc::new(Mutex::new(status)),
+            voice_config: Arc::new(Mutex::new(voice_config)),
+            stt,
+            tts,
+        }
+    }
+
+    pub async fn get_config(&self) -> VoiceConfig {
+        self.voice_config.lock().await.clone()
+    }
+
+    pub async fn update_config(&self, new_config: VoiceConfig) {
+        self.stt
+            .set_model_path(new_config.whisper_model_path.clone());
+        self.tts.set_model_path(new_config.piper_model_path.clone());
+        {
+            let mut status = self.state.lock().await;
+            status.active_device_name = new_config.selected_input_device.clone();
+        }
+        let mut cfg = self.voice_config.lock().await;
+        *cfg = new_config;
+    }
+
+    pub fn voice_config_ref(&self) -> Arc<Mutex<VoiceConfig>> {
+        Arc::clone(&self.voice_config)
     }
 
     pub async fn start(&self) -> Result<(), VoiceError> {
@@ -690,5 +801,139 @@ impl VoicePipeline {
         }
 
         Ok(output_audio)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_voice_config_default_and_serde() {
+        let default_config = VoiceConfig::default();
+        assert_eq!(default_config.whisper_model_path, None);
+        assert_eq!(default_config.piper_model_path, None);
+        assert_eq!(default_config.selected_input_device, None);
+        assert_eq!(default_config.selected_output_device, None);
+        assert_eq!(default_config.remote_stt_endpoint, None);
+
+        let config = VoiceConfig {
+            whisper_model_path: Some("/models/whisper-small.bin".to_string()),
+            piper_model_path: Some("/models/fr-siwis.onnx".to_string()),
+            selected_input_device: Some("in-0".to_string()),
+            selected_output_device: Some("out-1".to_string()),
+            remote_stt_endpoint: Some("http://localhost:8080/v1/audio/transcriptions".to_string()),
+        };
+
+        let json = serde_json::to_string(&config).expect("Sérialisation échouée");
+        let deserialized: VoiceConfig =
+            serde_json::from_str(&json).expect("Désérialisation échouée");
+        assert_eq!(config, deserialized);
+    }
+
+    #[test]
+    fn test_voice_config_partial_json_deserialization() {
+        let json = r#"{"whisper_model_path": "/path/whisper.bin"}"#;
+        let config: VoiceConfig =
+            serde_json::from_str(json).expect("Désérialisation partielle échouée");
+        assert_eq!(
+            config.whisper_model_path,
+            Some("/path/whisper.bin".to_string())
+        );
+        assert_eq!(config.piper_model_path, None);
+        assert_eq!(config.selected_input_device, None);
+        assert_eq!(config.selected_output_device, None);
+        assert_eq!(config.remote_stt_endpoint, None);
+    }
+
+    #[test]
+    fn test_whisper_and_piper_engine_model_path_updates() {
+        let whisper = WhisperSttEngine::new(None);
+        assert_eq!(whisper.model_path(), None);
+        whisper.set_model_path(Some("/models/whisper-base.bin".to_string()));
+        assert_eq!(
+            whisper.model_path(),
+            Some("/models/whisper-base.bin".to_string())
+        );
+
+        let piper = PiperTtsEngine::new(Some("/models/piper-base.onnx".to_string()));
+        assert_eq!(
+            piper.voice_model_path(),
+            Some("/models/piper-base.onnx".to_string())
+        );
+        piper.set_voice_model_path(None);
+        assert_eq!(piper.voice_model_path(), None);
+    }
+
+    #[tokio::test]
+    async fn test_voice_pipeline_config_lifecycle() {
+        let stt = Arc::new(WhisperSttEngine::new(None));
+        let tts = Arc::new(PiperTtsEngine::new(None));
+        let pipeline = VoicePipeline::new(VadConfig::default(), stt.clone(), tts.clone());
+
+        // Configuration initiale par défaut
+        let initial_config = pipeline.get_config().await;
+        assert_eq!(initial_config, VoiceConfig::default());
+        assert_eq!(stt.model_path(), None);
+        assert_eq!(tts.model_path(), None);
+
+        // Mise à jour de la configuration
+        let new_cfg = VoiceConfig {
+            whisper_model_path: Some("/custom/whisper-large.bin".to_string()),
+            piper_model_path: Some("/custom/piper-voice.onnx".to_string()),
+            selected_input_device: Some("Microphone USB".to_string()),
+            selected_output_device: Some("Casque USB".to_string()),
+            remote_stt_endpoint: Some("http://localhost:5000".to_string()),
+        };
+
+        pipeline.update_config(new_cfg.clone()).await;
+
+        // Validation get_config
+        let updated_config = pipeline.get_config().await;
+        assert_eq!(updated_config, new_cfg);
+
+        // Propagation vers les moteurs STT et TTS
+        assert_eq!(
+            stt.model_path(),
+            Some("/custom/whisper-large.bin".to_string())
+        );
+        assert_eq!(
+            tts.model_path(),
+            Some("/custom/piper-voice.onnx".to_string())
+        );
+
+        // Propagation vers VoiceStatus
+        let status = pipeline.get_status().await;
+        assert_eq!(
+            status.active_device_name,
+            Some("Microphone USB".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_voice_pipeline_with_custom_initial_config() {
+        let custom_cfg = VoiceConfig {
+            whisper_model_path: Some("/init/whisper.bin".to_string()),
+            piper_model_path: Some("/init/piper.onnx".to_string()),
+            selected_input_device: Some("Microphone Studio".to_string()),
+            selected_output_device: None,
+            remote_stt_endpoint: None,
+        };
+        let stt = Arc::new(WhisperSttEngine::new(None));
+        let tts = Arc::new(PiperTtsEngine::new(None));
+        let pipeline = VoicePipeline::with_voice_config(
+            VadConfig::default(),
+            custom_cfg.clone(),
+            stt.clone(),
+            tts.clone(),
+        );
+
+        assert_eq!(pipeline.get_config().await, custom_cfg);
+        assert_eq!(stt.model_path(), Some("/init/whisper.bin".to_string()));
+        assert_eq!(tts.model_path(), Some("/init/piper.onnx".to_string()));
+        assert_eq!(
+            pipeline.get_status().await.active_device_name,
+            Some("Microphone Studio".to_string())
+        );
     }
 }
