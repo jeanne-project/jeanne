@@ -970,6 +970,7 @@ pub fn run() {
                 );
             }
 
+            let settings_file = vault_path.join(".jeanne").join("local_llm_settings.json");
             let mut initial_config = if settings_file.exists() {
                 match std::fs::read_to_string(&settings_file) {
                     Ok(content) => {
