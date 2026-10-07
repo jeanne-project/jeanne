@@ -41,7 +41,8 @@ jobs:
       - name: Anti-Panic Audit (Zero unwrap/expect in crates/core/src)
         run: |
           echo "Auditing crates/core/src/ for forbidden unwrap() or expect() calls..."
-          if grep -rn -E '\.(unwrap|expect)\(' crates/core/src/; then
+          # Le code de test (`#[cfg(test)]`, en fin de fichier) est exclu de l'audit.
+          if find crates/core/src -name '*.rs' -print0 | xargs -0 awk '/#\[cfg\(test\)\]/ { nextfile } /\.(unwrap|expect)\(/ { print FILENAME ":" FNR ": " $0; found=1 } END { exit !found }'; then
             echo "::error::Found forbidden unwrap() or expect() call in crates/core/src/! All core domain errors must be handled gracefully via thiserror/anyhow."
             exit 1
           fi
