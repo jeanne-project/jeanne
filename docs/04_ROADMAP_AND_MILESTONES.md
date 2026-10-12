@@ -17,7 +17,7 @@ Ce document consigne la séquence de développement obligatoire de **Jeanne**. C
 | **Jalon 5** | **Pipeline Vocal** | Interaction bidirectionnelle STT (Whisper) et TTS (Piper) débrayable | < 250 Mo (0 Mo repos / 12 Mo mesuré) | ✅ Validé & Clôturé (04/10/2026) |
 | **Jalon 6** | **Capture de Réunion** | Diarisation matérielle stéréo (Micro/WASAPI) + OCR diapositives + Seeking | < 100 Mo (capture, 12 Mo mesuré / 0 Mo repos) | ✅ Validé & Clôturé (06/10/2026) |
 | **Jalon 7** | **Système de Plugins** | Runner IPC JSON-RPC sur stdio + Plugin parser PDF autonome (Go) | Éphémère (8,6 Mo mesuré) | ✅ Validé & Clôturé (07/10/2026) |
-| **Jalon 8** | **Hardening & v1** | Évaluation sur Golden Dataset + Résolution de conflits + Packaging OS | < 100 Mo | À venir |
+| **Jalon 8** | **Hardening & v1** | Évaluation sur Golden Dataset + Résolution de conflits + Packaging OS | < 100 Mo (38,2 Mo mesuré) | ✅ Validé & Clôturé (12/10/2026) |
 
 ---
 
