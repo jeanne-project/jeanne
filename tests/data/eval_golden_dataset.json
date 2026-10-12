@@ -1,0 +1,451 @@
+[
+  {
+    "id": "EVAL-001",
+    "query": "What is the primary key requirement for sqlite-vec in Jeanne?",
+    "ground_truth_note_id": "note_arch_sqlite_vec_01",
+    "expected_claims": [
+      "Must be a 64-bit signed integer rowid",
+      "TEXT or UUID primary keys cause runtime SQL errors"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-002",
+    "query": "Who won the 2030 World Cup in basketball?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-003",
+    "query": "What is the resident memory budget for Jeanne when idle in release build?",
+    "ground_truth_note_id": "note_arch_memory_budgets_02",
+    "expected_claims": [
+      "Release build idle RAM must remain strictly below 80 MB",
+      "Application resident footprint excluding LLM weights stays below 200 MB"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-004",
+    "query": "What is the maximum process footprint allowed in standalone local inference mode?",
+    "ground_truth_note_id": "note_arch_memory_budgets_02",
+    "expected_claims": [
+      "Active 3B quantized model footprint must not exceed 4.5 GB RAM"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-005",
+    "query": "How are vector score and BM25 score combined in the hybrid search formula?",
+    "ground_truth_note_id": "note_arch_timedecay_03",
+    "expected_claims": [
+      "Combines 70% vector similarity and 30% BM25 lexical score",
+      "Raw score is divided by 1 plus lambda times delta time in days"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-006",
+    "query": "What is the minimum cosine similarity threshold required by the anti-hallucination circuit breaker?",
+    "ground_truth_note_id": "note_arch_circuit_breaker_04",
+    "expected_claims": [
+      "Circuit breaker threshold is strictly 0.65",
+      "Queries below 0.65 trigger InformationNotFound"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-007",
+    "query": "How do plugins communicate with the core Jeanne process?",
+    "ground_truth_note_id": "note_arch_plugins_05",
+    "expected_claims": [
+      "Subprocesses communicate exclusively via JSON-RPC 2.0 over standard I/O stdio",
+      "Binary payloads are not streamed over stdio"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-008",
+    "query": "What is the target response latency for the floating quick-access palette?",
+    "ground_truth_note_id": "note_arch_conventions_11",
+    "expected_claims": [
+      "Quick-access overlay must appear and be interactive in less than 50 ms"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-009",
+    "query": "What is the secret recipe for traditional Bolognese lasagna?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-010",
+    "query": "What audio sampling rate is enforced across the recording and STT pipeline?",
+    "ground_truth_note_id": "note_arch_audio_10",
+    "expected_claims": [
+      "Standard audio sampling rate is 16000 Hz 16 kHz mono"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-011",
+    "query": "How does Jeanne recover when an audio device is disconnected during a meeting?",
+    "ground_truth_note_id": "note_arch_audio_10",
+    "expected_claims": [
+      "CPAL DeviceNotAvailable error is caught without panic",
+      "Spooler flushes and finalizes audio files up to interruption",
+      "Emits toast notification that audio device disconnected and meeting was saved"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-012",
+    "query": "How does Jeanne handle concurrent file modifications while indexing a note?",
+    "ground_truth_note_id": "note_arch_vault_indexing_16",
+    "expected_claims": [
+      "Computes SHA-256 hash before SQLite transaction",
+      "Verifies disk file hash and timestamp after parsing",
+      "Discards stale transaction and reenqueues updated file if hash changed"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-013",
+    "query": "What is the variation threshold for pHash slide detection in meeting keyframes?",
+    "ground_truth_note_id": "note_arch_slide_08",
+    "expected_claims": [
+      "Perceptual hash threshold is 15 percent Hamming distance variation"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-014",
+    "query": "Which stereo channels correspond to local mic and remote audio in meeting capture?",
+    "ground_truth_note_id": "note_arch_meeting_07",
+    "expected_claims": [
+      "Left channel records local microphone",
+      "Right channel records system loopback WASAPI audio"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-015",
+    "query": "What RMS energy ratio classifies a speaker segment as local Me?",
+    "ground_truth_note_id": "note_arch_meeting_07",
+    "expected_claims": [
+      "Ratio of mic RMS to sys RMS greater than 2.0 classifies speaker as Me"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-016",
+    "query": "What RMS energy ratio classifies a speaker segment as Remote?",
+    "ground_truth_note_id": "note_arch_meeting_07",
+    "expected_claims": [
+      "Ratio of mic RMS to sys RMS less than 0.5 classifies speaker as Remote"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-017",
+    "query": "What are the rules regarding unwrap and expect in production core crates?",
+    "ground_truth_note_id": "note_arch_conventions_11",
+    "expected_claims": [
+      "Strict zero unwrap and zero expect rule in crates/core",
+      "Errors must be mapped to typed thiserror enums"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-018",
+    "query": "What Rust edition is mandated across the workspace?",
+    "ground_truth_note_id": "note_arch_conventions_11",
+    "expected_claims": [
+      "Mandates Rust Edition 2024 with MSRV 1.85.0"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-019",
+    "query": "What happens if a user asks for tomorrow's weather forecast in Tokyo?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-020",
+    "query": "How is PII protected before querying remote OpenAI-compatible endpoints?",
+    "ground_truth_note_id": "note_arch_pii_09",
+    "expected_claims": [
+      "Deterministic regex redacts emails phones and credit cards",
+      "PII is demasked locally upon receiving streaming tokens"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-021",
+    "query": "What is the format requirement for note source citations in generated LLM answers?",
+    "ground_truth_note_id": "note_arch_pii_09",
+    "expected_claims": [
+      "Every factual claim must cite source note using format [source: filename.md]"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-022",
+    "query": "What was the closing stock price of Apple on January 1st 1985?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-023",
+    "query": "What is the primary role of the Architect agent in the development workflow?",
+    "ground_truth_note_id": "note_proc_git_hygiene_12",
+    "expected_claims": [
+      "Sole entry point for user requests and specification author",
+      "Orchestrates milestone branches reviews and merge gates"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-024",
+    "query": "Can code be implemented before a technical specification is approved?",
+    "ground_truth_note_id": "note_proc_git_hygiene_12",
+    "expected_claims": [
+      "Spec-Driven Development is mandatory",
+      "Zero lines of production code without validated spec in docs/specs"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-025",
+    "query": "What is the required status in docs/reviews/M{ID}_CODE_REVIEW.md before milestone merge?",
+    "ground_truth_note_id": "note_proc_git_hygiene_12",
+    "expected_claims": [
+      "Must explicitly state STATUS: APPROUVÉ"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-026",
+    "query": "What is the capital city of planet Neptune in the year 3000?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-027",
+    "query": "What are the four memory strata defined in the CoALA and IPCRA framework for Jeanne?",
+    "ground_truth_note_id": "note_arch_memory_budgets_02",
+    "expected_claims": [
+      "Procedural templates and protocols",
+      "Semantic verified facts and specifications",
+      "Episodic chronological logs and meeting transcripts",
+      "Working bounded active conversation window"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-028",
+    "query": "What is the core File-over-App invariant regarding the SQLite database?",
+    "ground_truth_note_id": "note_episodic_adr01_13",
+    "expected_claims": [
+      "Local vault of plain Markdown files is the primary immutable source of truth",
+      "SQLite database is strictly a disposable derived cache index"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-029",
+    "query": "How many Oscars did the movie Titanic win in 1998?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-030",
+    "query": "What half-life parameter is assigned to Procedural notes in Time-Decay scoring?",
+    "ground_truth_note_id": "note_arch_timedecay_03",
+    "expected_claims": [
+      "Procedural notes have half life of infinity with lambda equal to 0.0"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-031",
+    "query": "What half-life parameter is assigned to Episodic notes in Time-Decay scoring?",
+    "ground_truth_note_id": "note_arch_timedecay_03",
+    "expected_claims": [
+      "Episodic notes have half life of 30 days"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-032",
+    "query": "What half-life parameter is assigned to Semantic notes in Time-Decay scoring?",
+    "ground_truth_note_id": "note_arch_timedecay_03",
+    "expected_claims": [
+      "Semantic notes have half life of 365 days"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-033",
+    "query": "How do you perform a fatality move with Sub-Zero in Mortal Kombat 2?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-034",
+    "query": "How are superseded notes filtered during standard RAG retrieval?",
+    "ground_truth_note_id": "note_arch_timedecay_03",
+    "expected_claims": [
+      "Standard search filters out deprecated notes with WHERE statut = 'actif'",
+      "Superseded links are resolved to target note in graph"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-035",
+    "query": "What is the context window limit for local GGUF models in Vulkan inference?",
+    "ground_truth_note_id": "note_arch_hardware_06",
+    "expected_claims": [
+      "Context window is bounded to 4096 tokens to conserve RAM"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-036",
+    "query": "Who is the lead singer of the band Radiohead?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-037",
+    "query": "What Vulkan VRAM headroom must be preserved for the host operating system display compositor?",
+    "ground_truth_note_id": "note_arch_hardware_06",
+    "expected_claims": [
+      "Preserves at least 512 MB to 1024 MB VRAM headroom for host compositor"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-038",
+    "query": "What was decided in ADR-01 regarding Python runtime dependencies in core?",
+    "ground_truth_note_id": "note_episodic_adr01_13",
+    "expected_claims": [
+      "Strict zero Python runtime and zero Pydantic dependencies in crates/core",
+      "All document schemas are validated natively in Rust"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-039",
+    "query": "What was the root cause identified in Incident Report 2026-09-28?",
+    "ground_truth_note_id": "note_episodic_incident_15",
+    "expected_claims": [
+      "Unbounded memory growth caused by reading full WAV audio files directly into memory buffer",
+      "Fixed by enforcing streaming chunked spooling with DualTrackSpooler"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-040",
+    "query": "What action item was assigned to the frontend lead in the Q3 sprint sync?",
+    "ground_truth_note_id": "note_episodic_sync_14",
+    "expected_claims": [
+      "Implement Svelte 5 runes migration for floating palette overlay latency reduction"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-041",
+    "query": "What is the speed of light in kilometers per second through olive oil?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-042",
+    "query": "How are slide keyframes linked in generated meeting markdown notes?",
+    "ground_truth_note_id": "note_arch_slide_08",
+    "expected_claims": [
+      "Linked with interactive seek format [[timestamp]](seek:seconds)",
+      "Accompanied by markdown image tag referencing relative path"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-043",
+    "query": "What default model architecture was selected for local 2B inference in Milestone 4e?",
+    "ground_truth_note_id": "note_arch_hardware_06",
+    "expected_claims": [
+      "Qwen 2.5 or 3.5 2B Q4_K_M was selected as default lightweight local model"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-044",
+    "query": "What was the date of the coronation of Charlemagne in Rome?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-045",
+    "query": "What watchdog timeout kills unresponsive JSON-RPC subprocess plugins?",
+    "ground_truth_note_id": "note_arch_plugins_05",
+    "expected_claims": [
+      "Subprocess timeout kills hung plugins after 30 seconds"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-046",
+    "query": "What maximum line size is allowed when reading JSON-RPC stdout from plugins?",
+    "ground_truth_note_id": "note_arch_plugins_05",
+    "expected_claims": [
+      "Bounded stdout line reading up to 8 MB to prevent buffer overflow attacks"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-047",
+    "query": "What formula calculates the circumference of an elliptical galaxy?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  },
+  {
+    "id": "EVAL-048",
+    "query": "How is orphaned meeting session recovery triggered?",
+    "ground_truth_note_id": "note_arch_meeting_07",
+    "expected_claims": [
+      "Scans temp directory for unfinalized pcm files without matching markdown note",
+      "Reconstructs note and aligns spooled audio"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-049",
+    "query": "What compiler flags are required for release builds in Cargo.toml for Milestone 8?",
+    "ground_truth_note_id": "note_arch_conventions_11",
+    "expected_claims": [
+      "opt-level = 3 lto = true codegen-units = 1 panic = abort strip = true"
+    ],
+    "is_out_of_domain": false
+  },
+  {
+    "id": "EVAL-050",
+    "query": "What is the secret incantation to summon a unicorn in World of Warcraft?",
+    "ground_truth_note_id": null,
+    "expected_claims": [],
+    "is_out_of_domain": true
+  }
+]

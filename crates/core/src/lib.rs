@@ -1,4 +1,5 @@
 pub mod error;
+pub mod eval;
 pub mod hardware;
 pub mod llm;
 pub mod local_llm;
@@ -15,9 +16,10 @@ pub mod vault;
 pub mod voice;
 
 pub use meeting::{
-    AudioAligner, DiarizationMetrics, Diarizer, DualTrackSpooler, MeetingConfig, MeetingError,
-    MeetingNoteGenerator, MeetingRecorder, MeetingSession, MeetingStatus, MeetingSummaryResult,
-    PerceptualHasher, SlideDetector, SlideKeyframe, SpeakerTag, TranscriptSegment,
+    AudioAligner, DiarizationMetrics, Diarizer, DualTrackSpooler, HOT_UNPLUG_TOAST_MESSAGE,
+    HotUnplugRecoveryResult, MeetingConfig, MeetingError, MeetingNoteGenerator, MeetingRecorder,
+    MeetingSession, MeetingStatus, MeetingSummaryResult, PerceptualHasher, SlideDetector,
+    SlideKeyframe, SpeakerTag, TranscriptSegment, validate_wav_header_16k_mono, write_wav_file,
 };
 
 pub use plugins::{
@@ -42,6 +44,11 @@ pub use productivity::{
     format_math_result, load_snippets, sanitize_float_precision, toggle_task_in_file,
 };
 
+pub use eval::{
+    EvalMetrics, GoldenDatasetEvaluator, GoldenDatasetItem, OOD_FALLBACK_STRING, QueryEvalResult,
+    compute_deterministic_embedding,
+};
+
 pub use error::{JeanneError, RagError, Result};
 pub use hardware::{HardwareInfo, detect_hardware};
 pub use llm::{
@@ -64,7 +71,9 @@ pub use pii::{PiiSession, PiiSlidingBuffer};
 pub use rag::{RagEngine, check_circuit_breaker};
 pub use storage::{StorageManager, extract_search_keywords};
 pub use tokio_util::sync::CancellationToken;
-pub use vault::{VaultWatcher, resolve_vault_path};
+pub use vault::{
+    VaultWatcher, compute_sha256, index_note_with_concurrency_check, resolve_vault_path,
+};
 
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")

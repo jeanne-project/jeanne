@@ -131,6 +131,76 @@ pub struct MeetingSummaryResult {
     pub slide_count: usize,
 }
 
+/// Message de toast utilisateur lors du débranchement à chaud (SPEC §3.1).
+pub const HOT_UNPLUG_TOAST_MESSAGE: &str =
+    "Audio device disconnected. Meeting saved up to interruption.";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HotUnplugRecoveryResult {
+    pub session_id: String,
+    pub toast_message: String,
+    pub wav_file_path: PathBuf,
+    pub output_note_path: Option<PathBuf>,
+    pub duration_seconds: u64,
+}
+
+/// Écrit un flux PCM brut 16-bit dans un fichier WAV standard avec en-tête RIFF de 44 octets.
+pub fn write_wav_file(
+    output_path: &Path,
+    pcm_bytes: &[u8],
+    sample_rate: u32,
+    num_channels: u16,
+) -> Result<(), MeetingError> {
+    let mut file = File::create(output_path)
+        .map_err(|e| MeetingError::Io(format!("Création fichier WAV échouée : {e}")))?;
+    let bits_per_sample: u16 = 16;
+    let byte_rate = sample_rate * num_channels as u32 * (bits_per_sample as u32 / 8);
+    let block_align = num_channels * (bits_per_sample / 8);
+    let data_len = pcm_bytes.len() as u32;
+    let riff_chunk_size = 36 + data_len;
+
+    let mut header = Vec::with_capacity(44);
+    header.extend_from_slice(b"RIFF");
+    header.extend_from_slice(&riff_chunk_size.to_le_bytes());
+    header.extend_from_slice(b"WAVE");
+    header.extend_from_slice(b"fmt ");
+    header.extend_from_slice(&16u32.to_le_bytes()); // Subchunk1Size = 16
+    header.extend_from_slice(&1u16.to_le_bytes()); // AudioFormat = 1 (PCM)
+    header.extend_from_slice(&num_channels.to_le_bytes());
+    header.extend_from_slice(&sample_rate.to_le_bytes());
+    header.extend_from_slice(&byte_rate.to_le_bytes());
+    header.extend_from_slice(&block_align.to_le_bytes());
+    header.extend_from_slice(&bits_per_sample.to_le_bytes());
+    header.extend_from_slice(b"data");
+    header.extend_from_slice(&data_len.to_le_bytes());
+
+    file.write_all(&header)
+        .map_err(|e| MeetingError::Io(format!("Écriture en-tête WAV échouée : {e}")))?;
+    file.write_all(pcm_bytes)
+        .map_err(|e| MeetingError::Io(format!("Écriture données WAV échouée : {e}")))?;
+    file.flush()
+        .map_err(|e| MeetingError::Io(format!("Flush WAV échoué : {e}")))?;
+    Ok(())
+}
+
+/// Vérifie qu'un en-tête de 44 octets est un format WAV 16 kHz 16-bit PCM valide.
+pub fn validate_wav_header_16k_mono(header: &[u8; 44]) -> bool {
+    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" || &header[12..16] != b"fmt " {
+        return false;
+    }
+    let audio_format = u16::from_le_bytes([header[20], header[21]]);
+    let channels = u16::from_le_bytes([header[22], header[23]]);
+    let sample_rate = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
+    let bits_per_sample = u16::from_le_bytes([header[34], header[35]]);
+    let data_magic = &header[36..40];
+
+    audio_format == 1
+        && (channels == 1 || channels == 2)
+        && sample_rate == 16000
+        && bits_per_sample == 16
+        && data_magic == b"data"
+}
+
 // ============================================================================
 // 2. Gestion des Erreurs Typées (MeetingError)
 // ============================================================================
@@ -1015,6 +1085,77 @@ impl MeetingRecorder {
         *self.last_session.lock().await = Some(session);
 
         Ok(summary)
+    }
+
+    /// Récupère proprement un enregistrement interrompu brutalement par débranchement audio (SPEC §3.1).
+    pub async fn handle_hot_unplug(&self) -> Result<HotUnplugRecoveryResult, MeetingError> {
+        let mut state = self.state.lock().await;
+        if !state.is_recording {
+            return Err(MeetingError::Inactive);
+        }
+
+        let session_opt = self.current_session.lock().await.take();
+        let mut session = session_opt.ok_or(MeetingError::Inactive)?;
+
+        let spooler_opt = self.spooler.lock().await.take();
+        let _ = self.slide_detector.lock().await.take();
+
+        let (mic_pcm_path, _sys_pcm_path) = if let Some(spooler) = spooler_opt {
+            let (m_path, s_path, _, _) = spooler.finish()?;
+            (m_path, s_path)
+        } else {
+            (session.mic_file_path.clone(), session.sys_file_path.clone())
+        };
+
+        let now = Utc::now();
+        session.end_time = Some(now);
+        let duration = (now - session.start_time).num_seconds().max(1) as u64;
+        session.duration_seconds = duration;
+
+        // Lecture des échantillons PCM spoulés jusqu'à l'interruption
+        let pcm_bytes = std::fs::read(&mic_pcm_path).unwrap_or_default();
+
+        // Écriture du fichier WAV 16 kHz valide
+        let audio_dir = self.vault_path.join("Attachments").join("Audio");
+        if !audio_dir.exists() {
+            let _ = fs::create_dir_all(&audio_dir);
+        }
+        let wav_path = if audio_dir.exists() {
+            audio_dir.join(format!("{}.wav", session.id))
+        } else {
+            self.temp_dir.join(format!("{}.wav", session.id))
+        };
+
+        write_wav_file(&wav_path, &pcm_bytes, self.config.sample_rate, 1)?;
+
+        // Génération de la note Markdown de réunion
+        let reunions_dir = self.vault_path.join("Reunions");
+        if !reunions_dir.exists() {
+            let _ = fs::create_dir_all(&reunions_dir);
+        }
+        let note_path = reunions_dir.join(format!("{}.md", session.id));
+        let note_md = MeetingNoteGenerator::generate_markdown(&session);
+        let _ = fs::write(&note_path, note_md);
+        session.output_note_path = Some(note_path.clone());
+
+        // Invariant mémoire : Réinitialisation stricte à 0 Mo résiduel
+        state.is_recording = false;
+        state.current_session_id = None;
+        state.elapsed_seconds = 0;
+        state.memory_allocated_mb = 0;
+        state.mic_level_db = -100.0;
+        state.sys_level_db = -100.0;
+        state.slides_detected = 0;
+
+        *self.last_session.lock().await = Some(session.clone());
+
+        Ok(HotUnplugRecoveryResult {
+            session_id: session.id,
+            toast_message: HOT_UNPLUG_TOAST_MESSAGE.to_string(),
+            wav_file_path: wav_path,
+            output_note_path: Some(note_path),
+            duration_seconds: duration,
+        })
     }
 
     pub async fn get_last_session(&self) -> Option<MeetingSession> {

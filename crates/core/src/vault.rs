@@ -78,14 +78,21 @@ Jeanne est votre assistant de connaissances souverain et local-first ("File-over
 }
 
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::error::JeanneError;
 use crate::storage::StorageManager;
+
+/// Calcule le hash SHA-256 déterministe d'un contenu binaire ou textuel (SPEC §3.2).
+pub fn compute_sha256(content: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content);
+    format!("{:x}", hasher.finalize())
+}
 
 /// Observateur de système de fichiers pour la synchronisation du coffre en temps réel.
 pub struct VaultWatcher {
@@ -290,9 +297,7 @@ async fn reconcile_batch(
 
         if path.is_file() {
             if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                content.hash(&mut hasher);
-                let hash = format!("{:016x}", hasher.finish());
+                let hash = compute_sha256(content.as_bytes());
                 let now = chrono::Local::now().timestamp();
                 to_upsert.push(FileItem {
                     rel_path,
@@ -445,4 +450,109 @@ fn normalize_rel_path(vault_path: &Path, file_path: &Path) -> Option<String> {
     file_path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
+}
+
+/// Indexe une note Markdown avec vérification stricte anti-concurrence SHA-256 (SPEC §3.2).
+/// Si le fichier est modifié sur disque pendant le traitement, la transaction obsolète est rejetée
+/// et la nouvelle version est automatiquement rechargée et indexée.
+pub async fn index_note_with_concurrency_check(
+    vault_path: &Path,
+    rel_path: &str,
+    storage_mutex: &Arc<Mutex<StorageManager>>,
+    mutation_hook: Option<Box<dyn FnOnce() + Send>>,
+) -> Result<(usize, bool)> {
+    let abs_path = vault_path.join(rel_path);
+    if !abs_path.exists() {
+        return Err(JeanneError::Vault(format!(
+            "Fichier introuvable: {}",
+            abs_path.display()
+        )));
+    }
+
+    // 1. Lecture initiale V1 et calcul du hash SHA-256 avant transaction
+    let initial_content = tokio::fs::read_to_string(&abs_path).await?;
+    let initial_hash = compute_sha256(initial_content.as_bytes());
+
+    // 2. Déclenchement éventuel du hook de mutation concurrente
+    if let Some(hook) = mutation_hook {
+        hook();
+    }
+
+    // 3. Vérification de l'intégrité du fichier sur disque avant validation de transaction
+    let disk_content = tokio::fs::read_to_string(&abs_path).await?;
+    let disk_hash = compute_sha256(disk_content.as_bytes());
+
+    let (content_to_index, hash_to_index, indexed_version, retry_occurred) = if disk_hash
+        != initial_hash
+    {
+        tracing::info!(
+            "[Vault] Modification concurrente détectée pour {} (hash {} != {}). Rechargement de la version actualisée.",
+            rel_path,
+            initial_hash,
+            disk_hash
+        );
+        (disk_content, disk_hash, 2, true)
+    } else {
+        (initial_content, initial_hash, 1, false)
+    };
+
+    let now = chrono::Local::now().timestamp();
+    let (frontmatter, body) =
+        crate::parser::parse_markdown(&content_to_index).unwrap_or_else(|_| {
+            (
+                crate::models::NoteFrontmatter::default(),
+                content_to_index.clone(),
+            )
+        });
+    let frontmatter_json = serde_json::to_string(&frontmatter).ok();
+
+    let storage = storage_mutex
+        .lock()
+        .map_err(|e| JeanneError::Vault(format!("Verrouillage storage échoué: {e}")))?;
+
+    let conn = storage.raw_connection();
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+
+    let res: Result<()> = (|| {
+        storage.upsert_file(rel_path, &hash_to_index, now, frontmatter_json.as_deref())?;
+        let token_count = body.split_whitespace().count();
+        let date_creation = frontmatter.parse_date_creation().unwrap_or(now);
+        let superseded_by = frontmatter.clean_superseded_by();
+        let deprecated_at = frontmatter.deprecated_at;
+
+        let chunk = crate::models::IndexedChunk {
+            id: None,
+            chunk_id: format!("{rel_path}:0"),
+            file_path: rel_path.to_string(),
+            chunk_index: 0,
+            content: body,
+            token_count,
+            coala_type: frontmatter.coala_type(),
+            status: frontmatter.status(),
+            superseded_by: superseded_by.clone(),
+            deprecated_at,
+            date_creation,
+        };
+        storage.index_chunk(&chunk)?;
+        if let Some(target) = superseded_by {
+            let _ = storage.insert_file_link(
+                rel_path,
+                &target,
+                crate::models::FileLink::TYPE_SUPERSEDES,
+                now,
+            );
+        }
+        Ok(())
+    })();
+
+    match res {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok((indexed_version, retry_occurred))
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(e)
+        }
+    }
 }
