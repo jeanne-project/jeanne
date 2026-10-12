@@ -49,9 +49,9 @@ pre-review:
     @echo "=== [Pre-Review] Exécution des contrôles qualité ==="
     just check-permissions
     cargo fmt --check
-    cargo clippy -p jeanne-core --all-targets -- -D warnings
+    cargo clippy -p jeanne-core -p jeanne-cli --all-targets -- -D warnings
     just build-plugins
-    cargo test -p jeanne-core
+    cargo test -p jeanne-core -p jeanne-cli
     cd apps/desktop && npm run build
     @echo "✅ Contrôles statiques, tests et permissions validés."
 

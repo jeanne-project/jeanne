@@ -38,15 +38,15 @@ jobs:
       - name: Format Check (cargo fmt)
         run: cargo fmt --check
 
-      - name: Anti-Panic Audit (Zero unwrap/expect in crates/core/src)
+      - name: Anti-Panic Audit (Zero unwrap/expect in crates/core/src & crates/cli/src)
         run: |
-          echo "Auditing crates/core/src/ for forbidden unwrap() or expect() calls..."
+          echo "Auditing crates/core/src/ and crates/cli/src/ for forbidden unwrap() or expect() calls..."
           # Le code de test (`#[cfg(test)]`, en fin de fichier) est exclu de l'audit.
-          if find crates/core/src -name '*.rs' -print0 | xargs -0 awk '/#\[cfg\(test\)\]/ { nextfile } /\.(unwrap|expect)\(/ { print FILENAME ":" FNR ": " $0; found=1 } END { exit !found }'; then
-            echo "::error::Found forbidden unwrap() or expect() call in crates/core/src/! All core domain errors must be handled gracefully via thiserror/anyhow."
+          if find crates/core/src crates/cli/src -name '*.rs' -print0 | xargs -0 awk '/#\[cfg\(test\)\]/ { nextfile } /\.(unwrap|expect)\(/ { print FILENAME ":" FNR ": " $0; found=1 } END { exit !found }'; then
+            echo "::error::Found forbidden unwrap() or expect() call in crates/core/src/ or crates/cli/src/! All domain and CLI errors must be handled gracefully via thiserror/anyhow."
             exit 1
           fi
-          echo "✅ Zero forbidden unwrap/expect calls detected in crates/core/src/."
+          echo "✅ Zero forbidden unwrap/expect calls detected in crates/core/src/ and crates/cli/src/."
 
       - name: Clippy Strict Check
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -77,9 +77,10 @@ jobs:
 
       - name: Build Subprocess Plugins
         run: |
-          mkdir -p plugins/embeddings/bin plugins/llm-runner/bin
+          mkdir -p plugins/embeddings/bin plugins/llm-runner/bin plugins/pdf-parser/bin
           (cd plugins/embeddings && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/jeanne-embeddings .)
           (cd plugins/llm-runner && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/jeanne-llm-runner .)
+          (cd plugins/pdf-parser && CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/pdf-parser .)
 
       - name: Run Cargo Tests (Workspace)
         run: cargo test --workspace --verbose

@@ -41,6 +41,7 @@ jobs:
         with:
           workspaces: |
             crates/core
+            crates/cli
             apps/desktop/src-tauri
 
       - name: Install Frontend Dependencies
