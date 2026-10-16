@@ -62,3 +62,19 @@ jobs:
         with:
           command: check
           command-arguments: licenses bans sources
+
+  renovate-config-validator:
+    name: Renovate Config Validation
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate Renovate Configuration
+        run: npx --yes --package renovate renovate-config-validator --strict --no-global .github/renovate.json
+

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Jeanne automated dependency management configuration",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":rebaseStalePrs"
+  ],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Renovate Dependency Dashboard",
+  "timezone": "UTC",
+  "labels": ["dependencies"],
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
+  "prHourlyLimit": 2,
+  "prConcurrentLimit": 5,
+  "minimumReleaseAge": "3 days",
+  "rebaseWhen": "behind-base-branch",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 5am on monday"],
+    "commitMessageAction": "refresh lockfile"
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["dependencies", "security"]
+  },
+  "packageRules": [
+    {
+      "description": "Prioritize security vulnerability PRs",
+      "matchCurrentVersion": "!/.*-dev/",
+      "isVulnerabilityAlert": true,
+      "prPriority": 100
+    },
+    {
+      "description": "Group Tauri v2 core, build tooling, and frontend plugins to preserve ecosystem coherence",
+      "matchPackageNames": [
+        "/^@tauri-apps//",
+        "/^tauri$/",
+        "/^tauri-build$/",
+        "/^tauri-plugin-/"
+      ],
+      "groupName": "Tauri v2 Ecosystem",
+      "groupSlug": "tauri-ecosystem"
+    },
+    {
+      "description": "Group Svelte 5 and frontend tooling",
+      "matchPackageNames": [
+        "/^svelte$/",
+        "/^@sveltejs//",
+        "/^vite$/",
+        "/^typescript$/"
+      ],
+      "groupName": "Svelte 5 & Frontend Tooling",
+      "groupSlug": "frontend-tooling"
+    },
+    {
+      "description": "Group Tokio asynchronous runtime crates",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "/^tokio$/",
+        "/^tokio-/"
+      ],
+      "groupName": "Tokio Ecosystem",
+      "groupSlug": "tokio"
+    },
+    {
+      "description": "Group Serde serialization crates",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "/^serde$/",
+        "/^serde_/"
+      ],
+      "groupName": "Serde Ecosystem",
+      "groupSlug": "serde"
+    },
+    {
+      "description": "Group Tracing telemetry crates",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "/^tracing$/",
+        "/^tracing-/"
+      ],
+      "groupName": "Tracing Ecosystem",
+      "groupSlug": "tracing"
+    },
+    {
+      "description": "Group Audio processing crates",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "cpal",
+        "rubato"
+      ],
+      "groupName": "Audio Engine Crates",
+      "groupSlug": "audio-crates"
+    },
+    {
+      "description": "Group Go plugin dependencies",
+      "matchManagers": ["gomod"],
+      "groupName": "Go Plugin Dependencies",
+      "groupSlug": "go-plugins"
+    },
+    {
+      "description": "Group GitHub Actions workflows and pin to major tags",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "groupSlug": "github-actions",
+      "pinDigests": false
+    }
+  ]
+}

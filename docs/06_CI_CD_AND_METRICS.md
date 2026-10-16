@@ -37,6 +37,7 @@ Ces workflows sont exécutés sur l'infrastructure GitHub Actions via `.github/w
   1. `gitleaks` : Scan complet de l'historique Git via le binaire officiel autonome open-source `gitleaks` (évitant les restrictions de licence commerciale de l'Action v2 en contexte organisation GitHub).
   2. `cargo-audit` : Détection des vulnérabilités connues dans l'arbre des dépendances Rust via la base Advisory de RustSec.
   3. `cargo-deny` : Contrôle de la conformité des licences (autorisant strictement MIT, Apache-2.0, BSD-3-Clause, ISC, Unicode, CC0) et détection des doublons de crates non autorisés (`deny.toml`).
+  4. `renovate-config-validator` : Validation de syntaxe et conformité stricte du schéma de configuration Renovate (`.github/renovate.json`).
 
 ### 2.3 Validation de Compilation Tauri v2 (`build-check.yml`)
 * **Déclencheurs** : `pull_request` ciblant `main` avec modifications dans `apps/desktop/**`, `crates/**`, `Cargo.toml` ou `Cargo.lock`.
@@ -54,7 +55,23 @@ Ces workflows sont exécutés sur l'infrastructure GitHub Actions via `.github/w
 * **Publication** : Création d'une release GitHub au statut *brouillon* (*draft release*), téléversement des binaires signés et génération des sommes de contrôle cryptographiques `SHA256SUMS`.
 * **Signature de Code (Feuille de route Jalon 8)** : L'injection des certificats d'autorité (Apple Developer ID avec notarisation `altool`/`notarytool`, Windows Authenticode) et de la clé privée de mise à jour Tauri (`TAURI_SIGNING_PRIVATE_KEY`) est planifiée pour le Jalon 8 avant publication grand public.
 
+### 2.5 Gestion Automatisée des Dépendances (Renovate)
+* **Configuration** : `.github/renovate.json` (validé par `just check-renovate` et le job CI `renovate-config-validator`).
+* **Exécution** : Mend Renovate GitHub App (standard recommandé) ou workflow déclenchable `.github/workflows/renovate.yml` (hebdomadaire lundi 04:00 UTC et `workflow_dispatch`).
+* **Règles & Regroupements d'Écosystèmes** :
+  - **Écosystème Tauri v2** : Regroupement unifié des dépendances backend Rust (`tauri`, `tauri-build`, `tauri-plugin-*`) et frontend npm (`@tauri-apps/*`) pour préserver l'alignement strict des contrats IPC.
+  - **Svelte 5 & Frontend Tooling** : Regroupement de `svelte`, `@sveltejs/vite-plugin-svelte`, `vite` et `typescript`.
+  - **Runtimes Rust Fondamentaux** : Regroupements cohérents pour Tokio (`tokio`, `tokio-*`), Serde (`serde`, `serde_*`), Tracing (`tracing`, `tracing-*`) et Audio (`cpal`, `rubato`).
+  - **Plugins Polyglottes Go** : Regroupement des modules Go sous `plugins/` (`plugins/**/go.mod`).
+  - **Workflows GitHub Actions** : Regroupement et conservation des tags majeurs sans casser les runners.
+* **Garde-fous de Sécurité & Stabilité** :
+  - **Délai de rétention (Minimum Release Age)** : 3 jours minimum sur toute mise à jour externe afin de neutraliser les attaques par empoisonnement de la chaîne d'approvisionnement (*supply chain poisoning*) et les versions défectueuses retirées en urgence.
+  - **Priorité Sécurité** : Les correctifs de vulnérabilités (`vulnerabilityAlerts`) bénéficient d'une priorité maximale (`prPriority: 100`).
+  - **Maintenance Lockfile** : Rafraîchissement automatique déterministe des `Cargo.lock` et `package-lock.json` chaque lundi matin.
+  - **Conformité des Licences** : Toute dépendance introduite par Renovate est automatiquement soumise au contrôle `cargo-deny` (`security.yml`) pour vérifier la conformité stricte avec `deny.toml` (licences permissives MIT, Apache-2.0, BSD).
+
 ---
+
 
 ## 3. Catalogue des Pipelines Différés & Feuille de Route d'Activation
 
@@ -109,7 +126,8 @@ Milestone 8 (Hardening final)  ──> Eval-Driven Maintenance RAG (Golden Datas
 | Pipeline | Fréquence / Déclencheur | Environnement / Runner | Livrables / Objectif | Statut |
 | :--- | :--- | :--- | :--- | :--- |
 | **Fast CI** | `push main`, `pull_request` | GitHub Hosted `ubuntu-22.04` | Format, Clippy strict, Tests, Build UI | **Actif** |
-| **Security & Licenses** | PR, push, Hebdo (Lundi 3h) | GitHub Hosted `ubuntu-22.04` | Gitleaks, cargo-audit, cargo-deny | **Actif** |
+| **Security & Licenses** | PR, push, Hebdo (Lundi 3h) | GitHub Hosted `ubuntu-22.04` | Gitleaks, cargo-audit, cargo-deny, renovate-lint | **Actif** |
+| **Renovate Dependency Bot** | Hebdo (Lundi 4h), Dispatch | GitHub Hosted / GitHub App | PRs automatisées multi-écosystèmes sécurisées | **Actif** |
 | **Tauri Matrix Build** | PR touchant `apps/` ou `crates/` | Windows, Ubuntu, macOS | Validation compilation cross-platform | **Actif** |
 | **Release Packaging** | Tag `v*` | Windows, Ubuntu, macOS | NSIS, MSI, DEB, AppImage, DMG, SHA-256 | **Actif** |
 | **Criterion Benchmarks** | PR de jalon RAG / Inférence | Proxmox Runner auto-hébergé | Suivi de latence et débits tok/s | *Jalon 3-4* |

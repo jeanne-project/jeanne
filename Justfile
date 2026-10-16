@@ -24,6 +24,10 @@ start-milestone id name:
 check-permissions:
     @node scripts/check_tauri_permissions.mjs
 
+# Contrôle la validité du schéma et de la syntaxe de configuration Renovate
+check-renovate:
+    @npx --yes --package renovate renovate-config-validator --strict --no-global .github/renovate.json
+
 # Vérifie qu'aucun fichier non suivi (untracked) ou modifié n'a été oublié
 [unix]
 check-git-clean:
@@ -48,6 +52,7 @@ build-plugins:
 pre-review:
     @echo "=== [Pre-Review] Exécution des contrôles qualité ==="
     just check-permissions
+    just check-renovate
     cargo fmt --check
     cargo clippy -p jeanne-core -p jeanne-cli --all-targets -- -D warnings
     just build-plugins
