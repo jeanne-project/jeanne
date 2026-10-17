@@ -18,6 +18,9 @@
   "prConcurrentLimit": 5,
   "minimumReleaseAge": "3 days",
   "rebaseWhen": "behind-base-branch",
+  "prBodyNotes": [
+    ":shield: **Jeanne Governance Check** : Assurez-vous que les dépendances mises à jour respectent les licences autorisées (`deny.toml`), les budgets RSS mémoire (< 80 Mo repos / 150 Mo distant / 4.5 Go local) et l'absence d'appels `unwrap/expect` en production (`AGENTS.md`)."
+  ],
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 5am on monday"],
@@ -35,12 +38,13 @@
       "prPriority": 100
     },
     {
-      "description": "Group Tauri v2 core, build tooling, and frontend plugins to preserve ecosystem coherence",
+      "description": "Group Tauri v2 core, build tooling, frontend plugins, and release action",
       "matchPackageNames": [
-        "/^@tauri-apps//",
-        "/^tauri$/",
-        "/^tauri-build$/",
-        "/^tauri-plugin-/"
+        "@tauri-apps/**",
+        "tauri",
+        "tauri-build",
+        "tauri-plugin-**",
+        "tauri-apps/tauri-action"
       ],
       "groupName": "Tauri v2 Ecosystem",
       "groupSlug": "tauri-ecosystem"
@@ -48,20 +52,21 @@
     {
       "description": "Group Svelte 5 and frontend tooling",
       "matchPackageNames": [
-        "/^svelte$/",
-        "/^@sveltejs//",
-        "/^vite$/",
-        "/^typescript$/"
+        "@sveltejs/**",
+        "svelte",
+        "vite",
+        "typescript"
       ],
       "groupName": "Svelte 5 & Frontend Tooling",
-      "groupSlug": "frontend-tooling"
+      "groupSlug": "frontend-tooling",
+      "postUpdateOptions": ["npmDedupe"]
     },
     {
       "description": "Group Tokio asynchronous runtime crates",
       "matchManagers": ["cargo"],
       "matchPackageNames": [
-        "/^tokio$/",
-        "/^tokio-/"
+        "tokio",
+        "tokio-**"
       ],
       "groupName": "Tokio Ecosystem",
       "groupSlug": "tokio"
@@ -70,8 +75,8 @@
       "description": "Group Serde serialization crates",
       "matchManagers": ["cargo"],
       "matchPackageNames": [
-        "/^serde$/",
-        "/^serde_/"
+        "serde",
+        "serde_**"
       ],
       "groupName": "Serde Ecosystem",
       "groupSlug": "serde"
@@ -80,8 +85,8 @@
       "description": "Group Tracing telemetry crates",
       "matchManagers": ["cargo"],
       "matchPackageNames": [
-        "/^tracing$/",
-        "/^tracing-/"
+        "tracing",
+        "tracing-**"
       ],
       "groupName": "Tracing Ecosystem",
       "groupSlug": "tracing"
@@ -97,10 +102,11 @@
       "groupSlug": "audio-crates"
     },
     {
-      "description": "Group Go plugin dependencies",
+      "description": "Group Go plugin dependencies and synchronize go.sum via go mod tidy",
       "matchManagers": ["gomod"],
       "groupName": "Go Plugin Dependencies",
-      "groupSlug": "go-plugins"
+      "groupSlug": "go-plugins",
+      "postUpdateOptions": ["gomodTidy"]
     },
     {
       "description": "Group GitHub Actions workflows and pin to major tags",
