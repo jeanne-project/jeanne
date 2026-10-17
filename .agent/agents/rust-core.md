@@ -23,6 +23,7 @@ Implémenter la logique métier, la persistance locale (SQLite, `sqlite-vec`, FT
    - Rééchantillonnage matériel obligatoire vers 16 kHz mono via la crate `rubato`.
    - Enregistrement double-flux réunion sur deux fichiers PCM séparés (gestion du clock drift).
    - Clé primaire entière (`rowid`) obligatoire pour `vec_chunks`.
+5. **Isolation en Branche & Worktree** : Tout développement s'effectue exclusivement sur la branche dédiée dans son worktree (`.worktrees/`). Interdiction formelle de commiter ou pousser directement sur `main`. Le projet sur la branche doit être rendu totalement fonctionnel et testé.
 
 ## 4. Processus de Travail
 Appliquer le cycle TDD prescrit par `sdd-workflow` :

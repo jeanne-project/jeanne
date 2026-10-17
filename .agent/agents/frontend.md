@@ -20,3 +20,4 @@ Développer l'interface utilisateur de Jeanne, la palette flottante d'accès rap
 3. **Respect du Proxy Réactif** : Ne jamais déstructurer un objet `$state` sous peine de rompre la réactivité.
 4. **Sécurité Tauri v2** : Chaque appel `invoke()` doit correspondre à une permission déclarée dans `capabilities/default.json`.
 5. **Performance Overlay** : L'affichage de la palette flottante au raccourci clavier doit s'exécuter en **moins de 50 ms**. Nettoyer les écouteurs d'événements dans le callback de retour des `$effect`.
+6. **Isolation en Branche & Worktree** : Travailler exclusivement dans la branche dédiée via un worktree (`.worktrees/`). Interdiction formelle de commiter ou pousser directement sur `main`. L'interface et les commandes associées doivent être entièrement fonctionnelles avant merge.

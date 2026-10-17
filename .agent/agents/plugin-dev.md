@@ -22,3 +22,4 @@ Concevoir et maintenir les extensions et modules d'ingestion lourds (parseurs PD
    - `stderr` : journaux de débogage et télémétrie.
 3. **Cycle de Vie Éphémère (`on_demand`)** : Le plugin est démarré à la demande, extrait le contenu structuré, retourne le résultat et s'arrête immédiatement pour libérer la mémoire.
 4. **Zéro Buffer Binaire IPC** : Seuls les chemins de fichiers (`file_path`) et le texte structuré (Markdown / JSON) transitent par les flux standards. Le plugin lit directement le fichier sur le disque.
+5. **Isolation en Branche & Worktree** : Développer exclusivement dans une branche dédiée via un worktree (`.worktrees/`). Interdiction formelle de pousser directement sur `main`. Le plugin doit être testé et pleinement fonctionnel avant intégration.

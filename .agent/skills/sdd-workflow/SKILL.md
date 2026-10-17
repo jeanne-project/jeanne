@@ -46,12 +46,13 @@ Ce runbook régit le cycle de développement de chaque jalon dans le projet **Je
 ## 2. Directives Opérationnelles par Phase
 
 ### Phase 1 : Cadrage & Contrats (`docs/specs/<id>_SPEC_<nom>.md`)
-Avant d'écrire du code applicatif sous `crates/` ou `apps/`, la spec doit définir :
-1. **Structures et Énumérations** : Définition formelle des types Rust avec attributs `serde`.
-2. **Schéma SQL & DDL** : Tables réelles, tables virtuelles (`FTS5`, `sqlite-vec`), triggers et pragmas.
-3. **Contrats IPC Tauri v2** : Noms exacts des commandes, arguments typés et permissions de capabilities (`capabilities/default.json`).
-4. **Matrice de Tests** : Liste exhaustive des cas nominaux, limites et erreurs.
-5. **Budgets Matériels** : Plafonds RAM et latences cibles.
+Avant d'écrire du code applicatif sous `crates/` ou `apps/` :
+1. **Isolation en Branche & Worktree** : Créer obligatoirement une branche de travail dédiée dans un worktree isolé (`just start-milestone <id> <name>` ou `just worktree-add <name> <branch>`). **Interdiction formelle de coder ou pousser directement sur `main`**.
+2. **Structures et Énumérations** : Définition formelle des types Rust avec attributs `serde`.
+3. **Schéma SQL & DDL** : Tables réelles, tables virtuelles (`FTS5`, `sqlite-vec`), triggers et pragmas.
+4. **Contrats IPC Tauri v2** : Noms exacts des commandes, arguments typés et permissions de capabilities (`capabilities/default.json`).
+5. **Matrice de Tests** : Liste exhaustive des cas nominaux, limites et erreurs.
+6. **Budgets Matériels** : Plafonds RAM et latences cibles.
 
 ### Phase 2 : Phase Rouge (Test-First)
 * Tout nouveau comportement doit posséder un test unitaire ou d'intégration écrit **avant** son implémentation métier.
@@ -63,10 +64,11 @@ Avant d'écrire du code applicatif sous `crates/` ou `apps/`, la spec doit défi
 * Interdiction d'ajouter des abstractions anticipatives non prévues dans la spec (*YAGNI*).
 * Respecter l'interdiction de `unwrap()` ou `expect()` dans le code métier (`crates/core`).
 
-### Phase 4 : Audit de Clôture
+### Phase 4 : Refactoring, Audit & Clôture
 * Vérifier le non-dépassement des plafonds de RAM alloués.
-* Exécuter `cargo clippy --workspace --all-targets -- -D warnings`.
-* Valider les critères de la spécification.
+* Exécuter `just pre-review` (`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, build desktop, check-permissions).
+* Obtenir les rapports validés `docs/reviews/M{ID}_CODE_REVIEW.md` (`STATUS: APPROUVÉ`) et `docs/reviews/M{ID}_QA_REPORT.md`.
+* **Porte de Fusion vers `main`** : Ne déclencher la fusion sur `main` (`just merge-milestone`) QUE si le projet sur la branche est **pleinement fonctionnel** et exempt de régressions.
 
 ---
 
@@ -75,5 +77,7 @@ Avant d'écrire du code applicatif sous `crates/` ou `apps/`, la spec doit défi
 | Excuse fréquente de l'Agent IA | Réfutation formelle (Comportement Requis) |
 | :--- | :--- |
 | *« Je vais d'abord coder la fonctionnalité, puis j'écrirai les tests pour gagner du temps. »* | **Rejet immédiat**. La spec dicte les tests ; les tests dictent le code. La Phase Rouge est un prérequis absolu. |
+| *« Je code directement sur la branche `main` pour aller plus vite. »* | **Rejet immédiat**. La branche `main` est un sanctuaire. Tout développement s'effectue dans une branche dédiée via worktree. Aucun push direct sur `main`. |
 | *« C'est une petite fonction utilitaire, pas besoin de mettre à jour la spec. »* | **Rejet**. Toute signature publique ou modification de schéma doit être consignée dans le contrat de spec. |
 | *« La spec ne mentionne pas la gestion de cette erreur, j'utilise un `unwrap()`. »* | **Rejet**. Le code de production doit mapper toute erreur vers un type `thiserror` documenté. |
+| *« Fusionnons sur `main`, on corrigera les tests cassés plus tard. »* | **Rejet immédiat**. Le merge sur `main` exige que le projet sur la branche soit 100% fonctionnel et audité. |

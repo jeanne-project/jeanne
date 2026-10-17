@@ -41,7 +41,9 @@ The methodology separates concerns across three architectural levels:
 Every milestone outlined in `docs/04_ROADMAP_AND_MILESTONES.md` follows a linear lifecycle:
 
 1. **Contract Authoring**: The milestone specification is drafted in `docs/specs/` following `TEMPLATE_SPEC.md`.
-2. **Red State Validation**: Unit and integration test suites are written and committed. Tests must compile and fail predictably.
-3. **Green State Implementation**: Backend domain logic (`crates/core`) and desktop UI bindings (`apps/desktop`) are implemented until all test assertions pass.
-4. **Hardware Footprint Audit**: Memory consumption is benchmarked to guarantee compliance with the assigned RAM budget (< 80 MB idle, < 4.5 GB active 3B inference).
-5. **Milestone Sign-off**: Acceptance criteria are validated, and the release slice is committed.
+2. **Branch & Worktree Isolation**: A dedicated branch is created in an isolated Git worktree (`just start-milestone <id> <name>` or `just worktree-add`). **Direct commits or pushes to `main` are strictly forbidden** to preserve project stability and avoid breaking `main`.
+3. **Red State Validation**: Unit and integration test suites are written and committed. Tests must compile and fail predictably.
+4. **Green State Implementation**: Backend domain logic (`crates/core`) and desktop UI bindings (`apps/desktop`) are implemented until all test assertions pass.
+5. **Hardware Footprint Audit**: Memory consumption is benchmarked to guarantee compliance with the assigned RAM budget (< 80 MB idle, < 4.5 GB active 3B inference).
+6. **Milestone Sign-off & Functional Gate**: All acceptance criteria are validated, deterministic quality checks pass (`just pre-review`), and mandatory review reports (`M{ID}_CODE_REVIEW.md` and `M{ID}_QA_REPORT.md`) are approved.
+7. **Merge to Main**: The Architect merges the feature branch into `main` (`just merge-milestone <id> <name>`) **only when the project on the branch is verified to be 100% functional**.
