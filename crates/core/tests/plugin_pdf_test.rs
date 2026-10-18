@@ -190,7 +190,16 @@ async fn test_07_03_crash_immunity() {
     let dir = tempfile::tempdir().unwrap();
     let script = write_script(dir.path(), "crash.sh", "#!/bin/sh\nkill -SEGV $$\n");
     let req = JsonRpcRequest::new("parse_document", serde_json::json!({}), 1);
-    let res = execute_json_rpc(&script, dir.path(), &req, Duration::from_secs(5)).await;
+    let mut attempts = 0;
+    let res = loop {
+        match execute_json_rpc(&script, dir.path(), &req, Duration::from_secs(5)).await {
+            Err(PluginError::Io(ref err)) if err.raw_os_error() == Some(26) && attempts < 5 => {
+                attempts += 1;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            res => break res,
+        }
+    };
     match res {
         Err(PluginError::ProcessFailed(code, _)) => {
             // Terminé par signal : pas de code de sortie classique.
@@ -204,8 +213,15 @@ async fn test_07_03_crash_immunity() {
         "ok.sh",
         "#!/bin/sh\nread l\necho '{\"jsonrpc\":\"2.0\",\"result\":{\"pong\":true},\"id\":1}'\n",
     );
-    let resp = execute_json_rpc(&ok, dir.path(), &req, Duration::from_secs(5))
-        .await
-        .unwrap();
+    let mut attempts = 0;
+    let resp = loop {
+        match execute_json_rpc(&ok, dir.path(), &req, Duration::from_secs(5)).await {
+            Err(PluginError::Io(ref err)) if err.raw_os_error() == Some(26) && attempts < 5 => {
+                attempts += 1;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            res => break res.unwrap(),
+        }
+    };
     assert_eq!(resp.result.unwrap()["pong"], true);
 }
