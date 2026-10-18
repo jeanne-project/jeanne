@@ -5,6 +5,9 @@ members = [
     "crates/cli",
     "apps/desktop/src-tauri"
 ]
+exclude = [
+    ".agent/skills/rust-skills/checks"
+]
 
 [workspace.package]
 version = "0.1.0"
