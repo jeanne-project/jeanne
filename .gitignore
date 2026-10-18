@@ -1,6 +1,7 @@
 # Rust
 target/
 .cargo/
+!.cargo/audit.toml
 **/*.rs.bk
 
 # Node / Frontend
