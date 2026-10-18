@@ -80,9 +80,13 @@ fn build_sample_pdf() -> Vec<u8> {
 
 #[cfg(unix)]
 fn write_script(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
+    use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     let path = dir.join(name);
-    std::fs::write(&path, body).unwrap();
+    let mut file = std::fs::File::create(&path).unwrap();
+    file.write_all(body.as_bytes()).unwrap();
+    file.sync_all().unwrap();
+    drop(file);
     let mut perms = std::fs::metadata(&path).unwrap().permissions();
     perms.set_mode(0o755);
     std::fs::set_permissions(&path, perms).unwrap();

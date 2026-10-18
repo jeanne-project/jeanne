@@ -33,7 +33,22 @@ pub async fn execute_json_rpc(
         // Garantit l'éradication du processus sur tous les chemins de sortie (erreurs `?`).
         .kill_on_drop(true);
 
-    let mut child = cmd.spawn().map_err(PluginError::Io)?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) if e.raw_os_error() == Some(26) => {
+            // ETXTBSY ("Text file busy"): file was recently written; retry briefly
+            let mut spawned = None;
+            for _ in 0..10 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                if let Ok(c) = cmd.spawn() {
+                    spawned = Some(c);
+                    break;
+                }
+            }
+            spawned.ok_or(PluginError::Io(e))?
+        }
+        Err(e) => return Err(PluginError::Io(e)),
+    };
 
     let mut stdin = child
         .stdin
