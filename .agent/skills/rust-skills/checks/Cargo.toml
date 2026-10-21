@@ -25,7 +25,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 log = "0.4"
 smallvec = "1"
-arrayvec = "0.7"
+arrayvec = "0.7.1"
 thin-vec = "0.2"
 bytes = "1"
 compact_str = "0.9"
