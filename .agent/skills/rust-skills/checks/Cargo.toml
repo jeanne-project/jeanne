@@ -45,7 +45,7 @@ mockall = "0.13"
 proptest = "1"
 insta = "1"
 criterion = "0.5"
-loom = "0.7"
+loom = "0.7.1"
 syn = { version = "2", features = ["full", "extra-traits", "derive"] }
 quote = "1"
 proc-macro2 = "1"
