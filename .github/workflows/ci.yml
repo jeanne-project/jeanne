@@ -17,10 +17,10 @@ env:
 jobs:
   rust-static-and-lint:
     name: Rust Static Analysis & Anti-Panic Check
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install system dependencies (Linux / WebKitGTK)
         run: |
@@ -53,10 +53,10 @@ jobs:
 
   rust-test:
     name: Engine & Storage Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install system dependencies (Linux / WebKitGTK)
         run: |
@@ -70,7 +70,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.22'
           cache: false
@@ -87,15 +87,15 @@ jobs:
 
   frontend:
     name: Frontend Build & Typecheck (Svelte 5 / TS)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           cache: 'npm'
           cache-dependency-path: apps/desktop/package-lock.json
 
