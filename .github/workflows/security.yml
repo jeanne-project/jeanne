@@ -15,10 +15,10 @@ concurrency:
 jobs:
   gitleaks:
     name: Secret Leak Detection (Gitleaks)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -34,10 +34,10 @@ jobs:
 
   cargo-audit:
     name: Rust Vulnerability Audit (cargo-audit)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -52,10 +52,10 @@ jobs:
 
   cargo-deny:
     name: License Compliance & Duplicate Bans (cargo-deny)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run cargo-deny check
         uses: EmbarkStudios/cargo-deny-action@v2
@@ -65,15 +65,15 @@ jobs:
 
   renovate-config-validator:
     name: Renovate Config Validation
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Validate Renovate Configuration
         run: npx --yes --package renovate renovate-config-validator --strict --no-global .github/renovate.json
